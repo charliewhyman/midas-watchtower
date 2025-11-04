@@ -9,12 +9,12 @@ services:
     environment:
       - BASE_URL=http://localhost:5000
 
-  metadata-scraper:
-    build: ./metadata-scraper
-    container_name: metadata-scraper
+  metadata-monitor:
+    build: ./metadata-monitor
+    container_name: metadata-monitor
     volumes:
-      - ./metadata-scraper/data:/app/data
-      - ./metadata-scraper/logs:/app/logs
+      - ./metadata-monitor/data:/app/data
+      - ./metadata-monitor/logs:/app/logs
     environment:
       - CHECK_INTERVAL=3600
     restart: unless-stopped

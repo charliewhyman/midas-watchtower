@@ -148,6 +148,7 @@ class AISafetyMonitor:
         self.setup_data_directory()
         self.setup_session()
         self.setup_notifier()
+        self.setup_changedetection_watches()
         logger.info("AISafetyMonitor initialized")
     
     def load_config(self, config_path):
@@ -305,6 +306,25 @@ class AISafetyMonitor:
         
         return changes
     
+    def add_url_to_changedetection(self, url):
+        """Add a single URL to changedetection.io"""
+        try:
+            response = requests.post(
+                "http://changedetection-app:5000/api/v1/watch",
+                json={
+                    "url": url,
+                    "tag": "ai-safety-discovery",
+                    "title": f"Discovered - {url}"
+                },
+                timeout=10
+            )
+            if response.status_code in [200, 201]:
+                logger.info(f"✓ Added discovered URL to changedetection.io: {url}")
+            else:
+                logger.warning(f"✗ Failed to add discovered URL {url}: {response.status_code}")
+        except Exception as e:
+            logger.error(f"Error adding discovered URL {url} to changedetection.io: {e}")
+            
     def check_all_urls(self):
         """Check all monitored URLs for changes"""
         logger.info(f"Starting URL check at {datetime.now()}")
@@ -349,6 +369,9 @@ class AISafetyMonitor:
                 })
                 logger.info(f"New URL discovered: {new_url}")
                 history[new_url] = current_meta
+                
+                # add to changedetection.io
+                self.add_url_to_changedetection(new_url)
         
         # Save updated history
         with open(self.history_file, 'w') as f:
@@ -379,6 +402,44 @@ class AISafetyMonitor:
         while True:
             schedule.run_pending()
             time.sleep(1)
+            
+    def setup_changedetection_watches(self):
+        """Add all monitored URLs from config to changedetection.io"""
+        logger.info("Setting up changedetection.io watches...")
+        
+        for url_config in self.config.get('monitored_urls', []):
+            url = url_config['url'] if isinstance(url_config, dict) else url_config
+            
+            try:
+                # Check if watch already exists
+                response = requests.get(
+                    f"http://changedetection-app:5000/api/v1/watch",
+                    timeout=10
+                )
+                
+                existing_urls = [watch['url'] for watch in response.json()]
+                
+                if url not in existing_urls:
+                    # Add new watch
+                    add_response = requests.post(
+                        "http://changedetection-app:5000/api/v1/watch",
+                        json={
+                            "url": url,
+                            "tag": "ai-safety",
+                            "title": f"AI Safety - {url}"
+                        },
+                        timeout=10
+                    )
+                    
+                    if add_response.status_code in [200, 201]:
+                        logger.info(f"✓ Added {url} to changedetection.io")
+                    else:
+                        logger.warning(f"✗ Failed to add {url}: {add_response.status_code}")
+                else:
+                    logger.info(f"✓ {url} already in changedetection.io")
+                    
+            except Exception as e:
+                logger.error(f"Error setting up watch for {url}: {e}")
 
 # FastAPI endpoints
 @app.get("/")

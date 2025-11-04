@@ -1,0 +1,46 @@
+version: '3.8'
+
+services:
+  changedetection:
+    image: ghcr.io/dgtlmoon/changedetection.io
+    container_name: changedetection-app
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./changedetection-data:/datastore
+    environment:
+      - PLAYWRIGHT_DRIVER_URL=ws://playwright:3000
+      - BASE_URL=http://localhost:5000
+    restart: unless-stopped
+    depends_on:
+      - playwright
+
+  playwright:
+    image: ghcr.io/dgtlmoon/changedetection.io-playwright
+    container_name: changedetection-playwright
+    restart: unless-stopped
+
+  metadata-scraper:
+    build: ./metadata-scraper
+    container_name: metadata-scraper
+    volumes:
+      - ./metadata-scraper/data:/app/data
+      - ./metadata-scraper/logs:/app/logs
+    environment:
+      - CHECK_INTERVAL=3600
+    restart: unless-stopped
+    depends_on:
+      - changedetection
+
+  nginx:
+    image: nginx:alpine
+    container_name: watchtower-nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf
+      - ./ssl:/etc/nginx/ssl
+    restart: unless-stopped
+    depends_on:
+      - changedetection

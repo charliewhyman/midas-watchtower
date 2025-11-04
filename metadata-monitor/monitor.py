@@ -219,6 +219,14 @@ class AISafetyMonitor:
         else:
             logger.info("Discord notifications not configured")
     
+    def get_changedetection_headers(self):
+        """Return headers including API key if available"""
+        api_key = os.getenv("CHANGEDETECTION_API_KEY")
+        headers = {"Content-Type": "application/json"}
+        if api_key:
+            headers["x-api-key"] = api_key
+        return headers
+
     def get_url_metadata(self, url):
         """Get comprehensive metadata for a URL"""
         try:
@@ -309,8 +317,9 @@ class AISafetyMonitor:
     def add_url_to_changedetection(self, url):
         """Add a single URL to changedetection.io"""
         try:
+            base_url = os.getenv("CHANGEDETECTION_URL", "http://changedetection:5000")
             response = requests.post(
-                "http://changedetection-app:5000/api/v1/watch",
+                f"{base_url}/api/v1/watch",
                 json={
                     "url": url,
                     "tag": "ai-safety-discovery",
@@ -404,42 +413,42 @@ class AISafetyMonitor:
             time.sleep(1)
             
     def setup_changedetection_watches(self):
-        """Add all monitored URLs from config to changedetection.io"""
-        logger.info("Setting up changedetection.io watches...")
-        
+        """Sync all monitored URLs from YAML to changedetection.io"""
+        logger.info("Syncing monitored URLs to changedetection.io...")
+
+        base_url = os.getenv("CHANGEDETECTION_URL", "http://changedetection:5000")
+        headers = self.get_changedetection_headers()
+
+        # Get existing watches
+        try:
+            response = requests.get(f"{base_url}/api/v1/watch", headers=headers, timeout=10)
+            existing_urls = [watch['url'] for watch in response.json()]
+            logger.info(f"Existing watches: {existing_urls}")
+        except Exception as e:
+            logger.error(f"Failed to fetch existing watches: {e}")
+            existing_urls = []
+
+        # Loop through YAML URLs
         for url_config in self.config.get('monitored_urls', []):
             url = url_config['url'] if isinstance(url_config, dict) else url_config
-            
-            try:
-                # Check if watch already exists
-                response = requests.get(
-                    f"http://changedetection-app:5000/api/v1/watch",
-                    timeout=10
-                )
-                
-                existing_urls = [watch['url'] for watch in response.json()]
-                
-                if url not in existing_urls:
-                    # Add new watch
-                    add_response = requests.post(
-                        "http://changedetection-app:5000/api/v1/watch",
-                        json={
-                            "url": url,
-                            "tag": "ai-safety",
-                            "title": f"AI Safety - {url}"
-                        },
-                        timeout=10
-                    )
-                    
+            payload = {
+                "url": url,
+                "tag": "ai-safety",
+                "title": f"AI Safety - {url}"
+            }
+
+            # Only add if not already present
+            if url not in existing_urls:
+                try:
+                    add_response = requests.post(f"{base_url}/api/v1/watch", json=payload, headers=headers, timeout=10)
                     if add_response.status_code in [200, 201]:
-                        logger.info(f"✓ Added {url} to changedetection.io")
+                        logger.info(f"✓ Added URL: {url}")
                     else:
-                        logger.warning(f"✗ Failed to add {url}: {add_response.status_code}")
-                else:
-                    logger.info(f"✓ {url} already in changedetection.io")
-                    
-            except Exception as e:
-                logger.error(f"Error setting up watch for {url}: {e}")
+                        logger.warning(f"✗ Failed to add URL {url}: {add_response.status_code}")
+                except Exception as e:
+                    logger.error(f"Error adding URL {url}: {e}")
+            else:
+                logger.info(f"URL already exists in changedetection.io: {url}")
 
 # FastAPI endpoints
 @app.get("/")

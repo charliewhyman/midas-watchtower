@@ -31,16 +31,3 @@ services:
     restart: unless-stopped
     depends_on:
       - changedetection
-
-  nginx:
-    image: nginx:alpine
-    container_name: watchtower-nginx
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./nginx.conf:/etc/nginx/nginx.conf
-      - ./ssl:/etc/nginx/ssl
-    restart: unless-stopped
-    depends_on:
-      - changedetection

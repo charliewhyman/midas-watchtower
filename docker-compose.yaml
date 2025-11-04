@@ -7,16 +7,7 @@ services:
     volumes:
       - ./changedetection-data:/datastore
     environment:
-      - PLAYWRIGHT_DRIVER_URL=ws://playwright:3000
       - BASE_URL=http://localhost:5000
-    restart: unless-stopped
-    depends_on:
-      - playwright
-
-  playwright:
-    image: ghcr.io/dgtlmoon/changedetection.io-playwright
-    container_name: changedetection-playwright
-    restart: unless-stopped
 
   metadata-scraper:
     build: ./metadata-scraper

@@ -205,3 +205,12 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# Data directories
+changedetection-data/
+metadata-scraper/data/
+metadata-scraper/logs/
+
+# Logs
+*.log
+logs/

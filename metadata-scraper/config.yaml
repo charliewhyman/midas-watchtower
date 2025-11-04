@@ -1,0 +1,226 @@
+# AI Safety Monitoring Configuration
+
+monitored_urls:
+  # OpenAI
+  - url: "https://openai.com/policies/usage-policies"
+    check_interval: 3600
+    type: "policy"
+    priority: "high"
+    
+  - url: "https://openai.com/safety"
+    check_interval: 3600  
+    type: "safety"
+    priority: "high"
+
+  - url: "https://openai.com/policies/shared-data-policy"
+    check_interval: 7200
+    type: "policy"
+    priority: "medium"
+
+  - url: "https://openai.com/policies/terms-of-use"
+    check_interval: 86400
+    type: "legal"
+    priority: "medium"
+
+  - url: "https://platform.openai.com/docs/api-reference/policies"
+    check_interval: 3600
+    type: "api_policy"
+    priority: "high"
+
+  # Anthropic
+  - url: "https://www.anthropic.com/usage-policies"
+    check_interval: 3600
+    type: "policy"
+    priority: "high"
+
+  - url: "https://docs.anthropic.com/claude/docs/usage-policies"
+    check_interval: 7200
+    type: "api_policy"
+    priority: "medium"
+
+  - url: "https://www.anthropic.com/responsible-scaling-policy"
+    check_interval: 7200
+    type: "safety"
+    priority: "high"
+
+  - url: "https://www.anthropic.com/ai-safety"
+    check_interval: 7200
+    type: "safety"
+    priority: "high"
+
+  # xAI
+  - url: "https://x.ai/legal/terms-of-service"
+    check_interval: 7200
+    type: "legal"
+    priority: "medium"
+
+  - url: "https://x.ai/safety"
+    check_interval: 7200
+    type: "safety"
+    priority: "medium"
+
+  - url: "https://x.ai/privacy"
+    check_interval: 86400
+    type: "policy"
+    priority: "low"
+
+  # Google DeepMind
+  - url: "https://deepmind.google/about/terms/"
+    check_interval: 86400
+    type: "legal"
+    priority: "medium"
+
+  - url: "https://deepmind.google/about/privacy/"
+    check_interval: 86400
+    type: "policy"
+    priority: "medium"
+
+  - url: "https://deepmind.google/why-ai/safety/"
+    check_interval: 7200
+    type: "safety"
+    priority: "high"
+
+  # Meta AI
+  - url: "https://ai.meta.com/terms/"
+    check_interval: 86400
+    type: "legal"
+    priority: "medium"
+
+  - url: "https://ai.meta.com/responsible-use/"
+    check_interval: 7200
+    type: "safety"
+    priority: "high"
+
+  - url: "https://ai.meta.com/llama/use-policy/"
+    check_interval: 7200
+    type: "policy"
+    priority: "high"
+
+  # Microsoft
+  - url: "https://www.microsoft.com/en-us/ai/responsible-ai"
+    check_interval: 7200
+    type: "safety"
+    priority: "high"
+
+  - url: "https://www.microsoft.com/en-us/ai/responsible-ai-use"
+    check_interval: 7200
+    type: "policy"
+    priority: "medium"
+
+  # Cohere
+  - url: "https://cohere.com/terms-of-use"
+    check_interval: 86400
+    type: "legal"
+    priority: "medium"
+
+  - url: "https://cohere.com/ai-safety"
+    check_interval: 7200
+    type: "safety"
+    priority: "medium"
+
+  # Mistral AI
+  - url: "https://mistral.ai/terms/"
+    check_interval: 86400
+    type: "legal"
+    priority: "medium"
+
+  - url: "https://mistral.ai/privacy-policy/"
+    check_interval: 86400
+    type: "policy"
+    priority: "low"
+
+  # API Documentation (High Signal)
+  - url: "https://platform.openai.com/docs/models"
+    check_interval: 1800
+    type: "api_models"
+    priority: "high"
+
+  - url: "https://docs.anthropic.com/claude/docs/models-overview"
+    check_interval: 1800
+    type: "api_models"
+    priority: "high"
+
+  - url: "https://docs.mistral.ai/platform/endpoints/"
+    check_interval: 3600
+    type: "api_models"
+    priority: "medium"
+
+discovery_patterns:
+  - name: "xAI Model Cards"
+    base: "https://data.x.ai"
+    pattern: "{date}-{model}-model-card.pdf"
+    models: ["grok-1", "grok-2", "grok-3", "grok-4", "grok-5", "grok-vision", "grok-audio"]
+    days_to_check: 30
+    check_interval: 86400
+
+  - name: "OpenAI Model Documentation"
+    base: "https://platform.openai.com/docs/models"
+    pattern: "gpt-{version}"
+    models: ["4", "4-turbo", "4o", "4o-mini", "3.5-turbo"]
+    days_to_check: 7
+    check_interval: 43200
+
+  - name: "Anthropic Model Documentation"
+    base: "https://docs.anthropic.com/claude/docs"
+    pattern: "claude-{version}"
+    models: ["3-opus", "3-sonnet", "3-haiku", "2.1", "2.0"]
+    days_to_check: 7
+    check_interval: 43200
+
+  - name: "Mistral Model Documentation"
+    base: "https://docs.mistral.ai/platform/endpoints"
+    pattern: "mistral-{model}"
+    models: ["tiny", "small", "medium", "large", "embed"]
+    days_to_check: 7
+    check_interval: 43200
+
+notifications:
+  enabled: true
+  discord:
+    webhook_url: #TODO add URL
+    username: "Midas Watchtower"
+
+
+
+logging:
+  level: "INFO"
+  file: "logs/monitor.log"
+  max_size_mb: 10
+  backup_count: 5
+
+  # Separate log files for different components
+  access_log: "logs/access.log"
+  error_log: "logs/error.log"
+
+# Performance Settings
+performance:
+  max_concurrent_checks: 5
+  request_timeout: 30
+  retry_attempts: 3
+  retry_delay: 5
+
+# Content Filtering (Focus on safety-relevant changes)
+content_filters:
+  include_keywords:
+    - "safety"
+    - "ethical"
+    - "responsible"
+    - "alignment"
+    - "misuse"
+    - "harm"
+    - "risk"
+    - "policy"
+    - "guideline"
+    - "restriction"
+    - "prohibited"
+    - "allowed"
+    - "compliance"
+    - "moderation"
+
+  exclude_keywords:
+    - "blog"
+    - "news"
+    - "event"
+    - "career"
+    - "job"
+    - "contact"

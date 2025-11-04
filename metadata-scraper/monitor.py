@@ -7,9 +7,8 @@ import schedule
 from datetime import datetime, timedelta
 from pathlib import Path
 import logging
-from fastapi import FastAPI
-import uvicorn
 import os
+from fastapi import FastAPI
 
 # Setup logging
 logging.basicConfig(
@@ -424,6 +423,7 @@ if __name__ == "__main__":
     
     # Start FastAPI server in background
     import threading
+    import uvicorn
     def start_api():
         uvicorn.run(app, host="0.0.0.0", port=8000, log_level="info")
     

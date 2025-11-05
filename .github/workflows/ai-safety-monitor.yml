@@ -23,18 +23,10 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Create data and logs directory
+      - name: Create data directory
         run: |
-            mkdir -p metadata-monitor/data
-            mkdir -p metadata-monitor/logs
-
-      - name: Cache monitoring data
-        uses: actions/cache@v3
-        with:
-          path: metadata-monitor/data
-          key: monitoring-data-${{ hashFiles('metadata-monitor/config.yaml') }}
-          restore-keys: |
-            monitoring-data-
+          mkdir -p metadata-monitor/data
+          mkdir -p metadata-monitor/logs
 
       - name: Install dependencies
         run: |
@@ -43,7 +35,7 @@ jobs:
 
       - name: Run AI safety scan
         env:
-          GITHUB_ACTIONS: 'true'  # Triggers one-shot mode in monitor.py
+          GITHUB_ACTIONS: 'true'
         run: |
           cd metadata-monitor
           python monitor.py
@@ -61,11 +53,8 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Run ID:** ${{ github.run_id }}" >> $GITHUB_STEP_SUMMARY
           echo "**Trigger:** ${{ github.event_name }}" >> $GITHUB_STEP_SUMMARY
-          echo "**Status:** ✅ Completed successfully" >> $GITHUB_STEP_SUMMARY
+          echo "**Status:** Completed successfully" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "## 📊 Results" >> $GITHUB_STEP_SUMMARY
+          echo "## Results" >> $GITHUB_STEP_SUMMARY
           echo "- Monitoring data saved as artifacts" >> $GITHUB_STEP_SUMMARY
-          echo "- Check the artifacts above for detailed change history" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "---" >> $GITHUB_STEP_SUMMARY
-          echo "*View the url_history.json file in artifacts to see all detected changes*" >> $GITHUB_STEP_SUMMARY
+          echo "- Check artifacts for detailed change history" >> $GITHUB_STEP_SUMMARY

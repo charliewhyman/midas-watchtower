@@ -22,6 +22,11 @@ jobs:
         with:
           python-version: '3.11'
 
+      - name: Create data and logs directory
+        run: |
+            mkdir -p metadata-monitor/data
+            mkdir -p metadata-monitor/logs
+
       - name: Cache monitoring data
         uses: actions/cache@v3
         with:

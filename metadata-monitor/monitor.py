@@ -505,18 +505,36 @@ def run_once(self):
 if __name__ == "__main__":
     import os
     
-    monitor = AISafetyMonitor()
-    
-    # If CHECK_INTERVAL is 1, run once and exit (for GitHub Actions)
-    if os.getenv('CHECK_INTERVAL') == '1':
-        changes = monitor.run_once()
-        exit(0 if changes else 1)
+    # Check if running in GitHub Actions or one-shot mode
+    if os.getenv('GITHUB_ACTIONS') == 'true' or os.getenv('CHECK_INTERVAL') == '1':
+        print(" Running in one-shot mode")
+        monitor = AISafetyMonitor()
+        
+        # Use run_once if it exists, otherwise use check_all_urls
+        if hasattr(monitor, 'run_once'):
+            changes = monitor.run_once()
+        else:
+            changes = monitor.check_all_urls()
+            
+        print(f"Scan complete. Changes detected: {len(changes)}")
+        
+        # Exit with code 0 (success) regardless of changes
+        # GitHub Actions will show the results in the summary
+        exit(0)
+        
     else:
-        # Original continuous monitoring
+        # Original continuous monitoring (for local/Docker)
+        print("Running in continuous monitoring mode")
+        monitor = AISafetyMonitor()
+        
+        # Start FastAPI server in background
         import threading
         def start_api():
             uvicorn.run(app, host="0.0.0.0", port=8000, log_level="info")
         
         api_thread = threading.Thread(target=start_api, daemon=True)
         api_thread.start()
+        
+        # Start scheduled checks
+        logger.info("Starting AI Safety Metadata Monitor...")
         monitor.run_scheduled_checks()

@@ -35,46 +35,31 @@ jobs:
           cd metadata-monitor
           pip install -r requirements.txt
 
-      - name: Run monitoring with timeout
+      - name: Run AI safety scan
         env:
-          CHECK_INTERVAL: 1  # Run once and exit
+          GITHUB_ACTIONS: 'true'  # Triggers one-shot mode in monitor.py
         run: |
           cd metadata-monitor
-          # Modify monitor.py to run once and exit when CHECK_INTERVAL=1
-          timeout 300 python monitor.py || echo "Monitoring completed or timed out"
+          python monitor.py
 
-      - name: Check for changes
-        id: changes
-        run: |
-          cd metadata-monitor/data
-          if git diff --exit-code url_history.json; then
-            echo "changes_detected=false" >> $GITHUB_OUTPUT
-          else
-            echo "changes_detected=true" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Upload results
+      - name: Upload monitoring data
         uses: actions/upload-artifact@v4
         with:
-          name: monitoring-${{ github.run_id }}
+          name: monitoring-data-${{ github.run_id }}
           path: metadata-monitor/data/
           retention-days: 7
 
-      - name: Send Discord notification on changes
-        if: steps.changes.outputs.changes_detected == 'true'
-        uses: sarisia/actions-status-discord@v1
-        with:
-          title: "AI Safety Changes Detected"
-          description: "New changes found in monitored AI policy pages"
-          color: 0xff0000
-          url: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
-
       - name: Create summary
         run: |
-          echo "## AI Safety Monitoring Summary" >> $GITHUB_STEP_SUMMARY
+          echo "# AI Safety Monitoring Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Run ID:** ${{ github.run_id }}" >> $GITHUB_STEP_SUMMARY
           echo "**Trigger:** ${{ github.event_name }}" >> $GITHUB_STEP_SUMMARY
-          echo "**Changes Detected:** ${{ steps.changes.outputs.changes_detected }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Status:** ✅ Completed successfully" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "[View Artifacts](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})" >> $GITHUB_STEP_SUMMARY
+          echo "## 📊 Results" >> $GITHUB_STEP_SUMMARY
+          echo "- Monitoring data saved as artifacts" >> $GITHUB_STEP_SUMMARY
+          echo "- Check the artifacts above for detailed change history" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "---" >> $GITHUB_STEP_SUMMARY
+          echo "*View the url_history.json file in artifacts to see all detected changes*" >> $GITHUB_STEP_SUMMARY

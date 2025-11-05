@@ -1,0 +1,80 @@
+name: AI Safety Monitor
+on:
+  schedule:
+    # Run at 6 AM, 12 PM, 6 PM UTC daily
+    - cron: '0 6,12,18 * * *'
+  workflow_dispatch:
+    inputs:
+      full_scan:
+        description: 'Run full discovery scan'
+        required: false
+        default: 'false'
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Cache monitoring data
+        uses: actions/cache@v3
+        with:
+          path: metadata-monitor/data
+          key: monitoring-data-${{ hashFiles('metadata-monitor/config.yaml') }}
+          restore-keys: |
+            monitoring-data-
+
+      - name: Install dependencies
+        run: |
+          cd metadata-monitor
+          pip install -r requirements.txt
+
+      - name: Run monitoring with timeout
+        env:
+          CHECK_INTERVAL: 1  # Run once and exit
+        run: |
+          cd metadata-monitor
+          # Modify monitor.py to run once and exit when CHECK_INTERVAL=1
+          timeout 300 python monitor.py || echo "Monitoring completed or timed out"
+
+      - name: Check for changes
+        id: changes
+        run: |
+          cd metadata-monitor/data
+          if git diff --exit-code url_history.json; then
+            echo "changes_detected=false" >> $GITHUB_OUTPUT
+          else
+            echo "changes_detected=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Upload results
+        uses: actions/upload-artifact@v4
+        with:
+          name: monitoring-${{ github.run_id }}
+          path: metadata-monitor/data/
+          retention-days: 7
+
+      - name: Send Discord notification on changes
+        if: steps.changes.outputs.changes_detected == 'true'
+        uses: sarisia/actions-status-discord@v1
+        with:
+          title: "AI Safety Changes Detected"
+          description: "New changes found in monitored AI policy pages"
+          color: 0xff0000
+          url: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+      - name: Create summary
+        run: |
+          echo "## AI Safety Monitoring Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Run ID:** ${{ github.run_id }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Trigger:** ${{ github.event_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Changes Detected:** ${{ steps.changes.outputs.changes_detected }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "[View Artifacts](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})" >> $GITHUB_STEP_SUMMARY

@@ -7,7 +7,7 @@ services:
     volumes:
       - ./changedetection-data:/datastore
     environment:
-      - BASE_URL=http://changedetection:5000
+      - BASE_URL=http://localhost:5000
 
   metadata-monitor:
     build: ./metadata-monitor
@@ -17,7 +17,7 @@ services:
       - ./metadata-monitor/logs:/app/logs
     environment:
       - CHECK_INTERVAL=3600
-      - CHANGEDETECTION_URL=http://changedetection:5000
+      - CHANGEDETECTION_URL=http://localhost:5000
       - CHANGEDETECTION_API_KEY=${CHANGEDETECTION_API_KEY}
 
     restart: unless-stopped

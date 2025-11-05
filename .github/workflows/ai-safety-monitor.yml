@@ -8,7 +8,8 @@ on:
       full_scan:
         description: 'Run full discovery scan'
         required: false
-        default: 'false'
+        type: boolean
+        default: false
 
 jobs:
   monitor:

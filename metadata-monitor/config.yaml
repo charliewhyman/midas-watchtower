@@ -2,7 +2,7 @@
 
 monitored_urls:
   # OpenAI
-  - url: "https://openai.com/policies/usage-policies"
+  - url: "https://openai.com/en-GB/policies/usage-policies/"
     check_interval: 3600
     type: "policy"
     priority: "high"
@@ -12,38 +12,18 @@ monitored_urls:
     type: "safety"
     priority: "high"
 
-  - url: "https://openai.com/policies/shared-data-policy"
-    check_interval: 7200
-    type: "policy"
-    priority: "medium"
-
-  - url: "https://openai.com/policies/terms-of-use"
+  - url: "https://openai.com/en-GB/policies/terms-of-use/"
     check_interval: 86400
     type: "legal"
     priority: "medium"
 
-  - url: "https://platform.openai.com/docs/api-reference/policies"
-    check_interval: 3600
-    type: "api_policy"
-    priority: "high"
-
   # Anthropic
-  - url: "https://www.anthropic.com/usage-policies"
+  - url: "https://www.anthropic.com/legal/aup"
     check_interval: 3600
     type: "policy"
     priority: "high"
 
-  - url: "https://docs.anthropic.com/claude/docs/usage-policies"
-    check_interval: 7200
-    type: "api_policy"
-    priority: "medium"
-
   - url: "https://www.anthropic.com/responsible-scaling-policy"
-    check_interval: 7200
-    type: "safety"
-    priority: "high"
-
-  - url: "https://www.anthropic.com/ai-safety"
     check_interval: 7200
     type: "safety"
     priority: "high"
@@ -59,39 +39,34 @@ monitored_urls:
     type: "safety"
     priority: "medium"
 
-  - url: "https://x.ai/privacy"
-    check_interval: 86400
-    type: "policy"
-    priority: "low"
-
-  # Google DeepMind
-  - url: "https://deepmind.google/about/terms/"
+  # Google Gemini
+  - url: "https://ai.google.dev/gemini-api/terms"
     check_interval: 86400
     type: "legal"
     priority: "medium"
 
-  - url: "https://deepmind.google/about/privacy/"
+  - url: "https://support.google.com/gemini/answer/13594961?hl=en"
     check_interval: 86400
     type: "policy"
     priority: "medium"
 
-  - url: "https://deepmind.google/why-ai/safety/"
+  - url: "https://gemini.google/policy-guidelines/"
     check_interval: 7200
     type: "safety"
     priority: "high"
 
   # Meta AI
-  - url: "https://ai.meta.com/terms/"
+  - url: "https://www.facebook.com/legal/ai-terms"
     check_interval: 86400
     type: "legal"
     priority: "medium"
 
-  - url: "https://ai.meta.com/responsible-use/"
+  - url: "https://ai.meta.com/static-resource/responsible-use-guide/"
     check_interval: 7200
     type: "safety"
     priority: "high"
 
-  - url: "https://ai.meta.com/llama/use-policy/"
+  - url: "https://www.llama.com/llama-protections/"
     check_interval: 7200
     type: "policy"
     priority: "high"
@@ -113,11 +88,6 @@ monitored_urls:
     type: "legal"
     priority: "medium"
 
-  - url: "https://cohere.com/ai-safety"
-    check_interval: 7200
-    type: "safety"
-    priority: "medium"
-
   # Mistral AI
   - url: "https://mistral.ai/terms/"
     check_interval: 86400
@@ -130,7 +100,7 @@ monitored_urls:
     priority: "low"
 
   # API Documentation (High Signal)
-  - url: "https://platform.openai.com/docs/models"
+  - url: "https://platform.openai.com/docs/guides/your-data"
     check_interval: 1800
     type: "api_models"
     priority: "high"
@@ -139,11 +109,6 @@ monitored_urls:
     check_interval: 1800
     type: "api_models"
     priority: "high"
-
-  - url: "https://docs.mistral.ai/platform/endpoints/"
-    check_interval: 3600
-    type: "api_models"
-    priority: "medium"
 
 discovery_patterns:
   - name: "xAI Model Cards"
@@ -164,13 +129,6 @@ discovery_patterns:
     base: "https://docs.anthropic.com/claude/docs"
     pattern: "claude-{version}"
     models: ["3-opus", "3-sonnet", "3-haiku", "2.1", "2.0"]
-    days_to_check: 7
-    check_interval: 43200
-
-  - name: "Mistral Model Documentation"
-    base: "https://docs.mistral.ai/platform/endpoints"
-    pattern: "mistral-{model}"
-    models: ["tiny", "small", "medium", "large", "embed"]
     days_to_check: 7
     check_interval: 43200
 

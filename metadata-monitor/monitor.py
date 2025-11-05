@@ -180,7 +180,7 @@ class AISafetyMonitor:
                         if response.status_code == 200:
                             logger.info(f"✓ Updated interval for {url}: {check_interval}s")
                         else:
-                            logger.warning(f"✗ Failed to update {url}: {response.status_code}")
+                            logger.warning(f"✗ Failed to add {url}: {response.status_code}, response: {response.text}")
                     except Exception as e:
                         logger.error(f"Error updating {url}: {e}")
                 else:
@@ -319,37 +319,45 @@ class AISafetyMonitor:
             for watch in watches:
                 if watch.get('tag') == 'ai-safety':
                     url = watch['url']
-                    
+
                     # Get watch details
                     watch_detail = requests.get(
                         f"{base_url}/api/v1/watch/{watch['uuid']}", 
                         headers=headers, 
                         timeout=10
                     ).json()
-                    
+
                     last_changed = watch_detail.get('last_changed')
-                    
-                    if last_changed:
+                    last_checked_str = history.get(url, {}).get('last_content_check')
+
+                    # Determine if we should register a content change
+                    if not last_checked_str:
+                        # First time checking this URL; treat as new
+                        changes_detected.append({
+                            'url': url,
+                            'changes': {'content_change': {'source': 'changedetection.io', 'status': 'new_watch'}},
+                            'timestamp': datetime.now().isoformat(),
+                            'change_source': 'changedetection_content'
+                        })
+                        # Initialize last_content_check in history
+                        if url not in history:
+                            history[url] = {}
+                        history[url]['last_content_check'] = datetime.now().isoformat()
+                    elif last_changed:
+                        # If last_changed exists, only mark as change if it's newer than last check
                         last_changed_dt = datetime.fromisoformat(last_changed.replace('Z', '+00:00'))
-                        last_checked_str = history.get(url, {}).get('last_content_check')
-                        
-                        # If we've never checked or content changed since last check
-                        if not last_checked_str or last_changed_dt > datetime.fromisoformat(last_checked_str):
+                        if last_changed_dt > datetime.fromisoformat(last_checked_str):
                             changes_detected.append({
                                 'url': url,
                                 'changes': {'content_change': {'source': 'changedetection.io'}},
                                 'timestamp': datetime.now().isoformat(),
                                 'change_source': 'changedetection_content'
                             })
-                            
-                            # Update last checked time
-                            if url not in history:
-                                history[url] = {}
                             history[url]['last_content_check'] = datetime.now().isoformat()
-            
-            # Save updated history
-            with open(self.history_file, 'w') as f:
-                json.dump(history, f, indent=2)
+                    
+                    # Save updated history
+                    with open(self.history_file, 'w') as f:
+                        json.dump(history, f, indent=2)
                 
         except Exception as e:
             logger.error(f"Error checking changedetection.io: {e}")

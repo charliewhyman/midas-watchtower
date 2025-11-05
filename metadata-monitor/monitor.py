@@ -1,6 +1,7 @@
 import requests
 import hashlib
 import json
+import uvicorn
 import yaml
 import time
 import schedule
@@ -487,19 +488,35 @@ async def status():
     except:
         return {"monitored_urls": 0, "last_check": None}
 
+def run_once(self):
+    """Run one monitoring cycle and exit (for GitHub Actions)"""
+    logger.info("Running single monitoring cycle...")
+    changes = self.check_all_urls()
+    
+    if changes:
+        logger.info(f"Detected {len(changes)} changes")
+        for change in changes:
+            logger.info(f"Change: {change['url']} - {change['changes']}")
+    else:
+        logger.info("No changes detected")
+    
+    return changes
+
 if __name__ == "__main__":
-    # Start the monitor
+    import os
+    
     monitor = AISafetyMonitor()
     
-    # Start FastAPI server in background
-    import threading
-    import uvicorn
-    def start_api():
-        uvicorn.run(app, host="0.0.0.0", port=8000, log_level="info")
-    
-    api_thread = threading.Thread(target=start_api, daemon=True)
-    api_thread.start()
-    
-    # Start scheduled checks
-    logger.info("Starting AI Safety Metadata Monitor...")
-    monitor.run_scheduled_checks()
+    # If CHECK_INTERVAL is 1, run once and exit (for GitHub Actions)
+    if os.getenv('CHECK_INTERVAL') == '1':
+        changes = monitor.run_once()
+        exit(0 if changes else 1)
+    else:
+        # Original continuous monitoring
+        import threading
+        def start_api():
+            uvicorn.run(app, host="0.0.0.0", port=8000, log_level="info")
+        
+        api_thread = threading.Thread(target=start_api, daemon=True)
+        api_thread.start()
+        monitor.run_scheduled_checks()

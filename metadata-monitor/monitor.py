@@ -444,6 +444,9 @@ class AISafetyMonitor:
         metadata_changes = self.check_metadata_changes()
         all_changes.extend(metadata_changes)
         
+        for change in all_changes:
+            self.sheets_reporter.log_change_to_sheets(change)
+        
         # Notify if changes detected
         if all_changes and self.notifier:
             self.notifier.send_alert(all_changes)

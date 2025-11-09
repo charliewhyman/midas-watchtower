@@ -135,14 +135,6 @@ discovery_patterns:
     days_to_check: 7
     check_interval: 43200
 
-notifications:
-  enabled: true
-  discord:
-    webhook_url: #TODO add URL
-    username: "Midas Watchtower"
-
-
-
 logging:
   level: "INFO"
   file: "logs/monitor.log"

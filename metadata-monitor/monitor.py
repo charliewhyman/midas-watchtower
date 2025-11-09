@@ -27,68 +27,6 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI(title="AI Safety Metadata Monitor")
 
-# ... (DiscordNotifier class remains the same) ...
-class DiscordNotifier:
-    def __init__(self, webhook_url, username="AI Safety Monitor", avatar_url=None):
-        self.webhook_url = webhook_url
-        self.username = username
-        self.avatar_url = avatar_url
-    
-    def send_alert(self, changes):
-        """Send formatted alert to Discord"""
-        if not changes or not self.webhook_url:
-            return
-        
-        embeds = []
-        for change in changes:
-            embed = {
-                "title": "🔍 AI Safety Change Detected",
-                "url": change['url'],
-                "color": 0xff6b6b,
-                "fields": [],
-                "timestamp": change['timestamp'],
-                "footer": {"text": "AI Safety Monitor"}
-            }
-            
-            for change_type, details in change['changes'].items():
-                if change_type == 'content_change':
-                    embed["fields"].append({
-                        "name": "Content Change",
-                        "value": f"Detected via changedetection.io",
-                        "inline": True
-                    })
-                elif change_type == 'metadata_change':
-                    embed["fields"].append({
-                        "name": "Metadata Change",
-                        "value": f"{details.get('type', 'Unknown')}",
-                        "inline": True
-                    })
-                elif change_type == 'status':
-                    embed["fields"].append({
-                        "name": "Status Change",
-                        "value": f"`{details['old']}` → `{details['new']}`",
-                        "inline": True
-                    })
-            
-            embeds.append(embed)
-        
-        for i in range(0, len(embeds), 10):
-            chunk = embeds[i:i+10]
-            payload = {
-                "username": self.username,
-                "embeds": chunk
-            }
-            
-            if self.avatar_url:
-                payload["avatar_url"] = self.avatar_url
-            
-            try:
-                response = requests.post(self.webhook_url, json=payload, timeout=10)
-                response.raise_for_status()
-                logger.info(f"Discord notification sent for {len(chunk)} changes")
-            except Exception as e:
-                logger.error(f"Failed to send Discord notification: {e}")
-
 class GoogleSheetsReporter:
     def __init__(self, credentials_file="google-sheets-credentials.json"):
         self.credentials_file = credentials_file
@@ -282,18 +220,6 @@ class AISafetyMonitor:
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
         })
-    
-    def setup_notifier(self):
-        """Setup Discord notifier if configured"""
-        self.notifier = None
-        discord_config = self.config.get('notifications', {}).get('discord', {})
-        
-        if discord_config.get('webhook_url'):
-            self.notifier = DiscordNotifier(
-                webhook_url=discord_config['webhook_url'],
-                username=discord_config.get('username', 'AI Safety Monitor')
-            )
-            logger.info("Discord notifier initialized")
     
     def get_changedetection_headers(self):
         """Return headers for changedetection.io API"""
@@ -628,7 +554,6 @@ class AISafetyMonitor:
             'due_urls': self.get_urls_due_for_check(),
             'config_summary': {
                 'total_urls': len(self.config.get('monitored_urls', [])),
-                'discord_enabled': self.notifier is not None,
                 'sheets_enabled': self.sheets_reporter.client is not None
             }
         }
@@ -667,21 +592,6 @@ async def sheets_status():
         "sheets_connected": monitor.sheets_reporter.client is not None,
         "last_updated": datetime.now().isoformat()
     }
-    
-@app.post("/test-discord")
-async def test_discord():
-    """Test Discord webhook"""
-    monitor = AISafetyMonitor()
-    if monitor.notifier:
-        test_change = [{
-            'url': 'https://example.com',
-            'changes': {'test': {'type': 'test_change'}},
-            'timestamp': datetime.now().isoformat(),
-            'change_source': 'test'
-        }]
-        monitor.notifier.send_alert(test_change)
-        return {"status": "test_sent"}
-    return {"status": "discord_not_configured"}
 
 if __name__ == "__main__":
     import os

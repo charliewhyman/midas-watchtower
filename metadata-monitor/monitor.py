@@ -96,6 +96,13 @@ class AISafetyMonitor:
         self.setup_notifier()
         self.setup_changedetection_watches()
         self.setup_scheduled_checks()
+        self.cycle_stats = {
+            'start_time': None,
+            'end_time': None,
+            'urls_checked': 0,
+            'errors': 0
+        }
+        self.sheets_reporter = GoogleSheetsReporter()
         
         logger.info("AI Safety Monitor initialized")
     
@@ -473,6 +480,49 @@ class AISafetyMonitor:
             'config_summary': self._get_config_summary()
         }
 
+class ReportGenerator:
+    def __init__(self, data_dir="data"):
+        self.data_dir = Path(data_dir)
+        self.reports_dir = self.data_dir / "reports"
+        self.reports_dir.mkdir(exist_ok=True)
+    
+    def generate_monitoring_report(self, monitoring_results, changes_detected, cycle_stats):
+        """Generate comprehensive reports in multiple formats"""
+        report_data = self._compile_report_data(monitoring_results, changes_detected, cycle_stats)
+        
+        # Generate different report formats (keep existing functionality)
+        self._generate_json_report(report_data)
+        self._generate_markdown_summary(report_data)
+        self._generate_github_summary(report_data)
+        
+        return report_data
+
+    def _compile_report_data(self, monitoring_results, changes_detected, cycle_stats):
+        """Compile report data - modified to include sheets status"""
+        # Keep existing compilation logic
+        content_changes = [c for c in changes_detected if 'content_change' in c.get('changes', {})]
+        metadata_changes = [c for c in changes_detected if 'metadata_change' in c.get('changes', {})]
+        status_changes = [c for c in changes_detected if 'status' in c.get('changes', {})]
+        
+        return {
+            'report_id': f"report_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
+            'report_date': datetime.now().isoformat(),
+            'changes_detected': changes_detected,
+            'content_changes_count': len(content_changes),
+            'metadata_changes_count': len(metadata_changes),
+            'status_changes_count': len(status_changes),
+            'cycle_stats': cycle_stats,
+            'summary': {
+                'total_changes': len(changes_detected),
+                'change_breakdown': {
+                    'content': len(content_changes),
+                    'metadata': len(metadata_changes),
+                    'status': len(status_changes)
+                }
+            },
+            'sheets_logged': len(changes_detected)
+        }
+        
 class GoogleSheetsReporter:
     def __init__(self, credentials_file="google-sheets-credentials.json"):
         self.credentials_file = credentials_file

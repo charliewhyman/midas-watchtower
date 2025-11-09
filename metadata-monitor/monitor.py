@@ -102,6 +102,8 @@ class AISafetyMonitor:
             'urls_checked': 0,
             'errors': 0
         }
+        
+        self.report_generator = ReportGenerator()
         self.sheets_reporter = GoogleSheetsReporter()
         
         logger.info("AI Safety Monitor initialized")

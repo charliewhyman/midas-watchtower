@@ -1,5 +1,8 @@
 # AI Safety Monitoring Configuration
 
+scheduling:
+  polling_interval: 300 # 5 mins
+
 monitored_urls:
   # OpenAI
   - url: "https://openai.com/en-GB/policies/usage-policies/"

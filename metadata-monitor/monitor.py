@@ -454,11 +454,15 @@ class AISafetyMonitor:
         return report
 
     def run_scheduled_monitoring(self):
-        """Run scheduled monitoring"""
-        # Run monitoring every 5 minutes to check for due URLs
-        schedule.every(5).minutes.do(self.run_monitoring_cycle)
+        """Run scheduled monitoring with configurable polling interval"""
+        scheduling_config = self.config.get('scheduling', {})
+        polling_interval = scheduling_config.get('polling_interval', 300)  # Default 5 minutes
         
-        logger.info("Started scheduled monitoring (runs every 5 minutes)")
+        polling_minutes = polling_interval // 60
+        
+        schedule.every(polling_minutes).minutes.do(self.run_monitoring_cycle)
+        
+        logger.info(f"Started scheduled monitoring (checks every {polling_interval}s for due URLs)")
         
         while True:
             schedule.run_pending()

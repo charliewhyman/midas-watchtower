@@ -377,7 +377,8 @@ class TestAISafetyMonitor:
             }
         }
     }))
-    def test_check_metadata_changes_with_changes(self, mock_file, mock_head, temp_config):
+    @patch('requests.Session.head')
+    def test_check_metadata_changes_with_changes(self, mock_head, temp_config):
         """Test metadata checking that detects changes"""
         # Mock current metadata with changes
         mock_response = Mock()
@@ -385,15 +386,24 @@ class TestAISafetyMonitor:
         mock_response.headers = {'content-type': 'text/html'}
         mock_response.url = 'https://example.com'
         mock_head.return_value = mock_response
-        
+
+        # Create the monitor first (read real YAML config)
         monitor = AISafetyMonitor(config_path=temp_config)
-        
-        # Force URL to be due for check
-        monitor.url_schedules['https://example.com']['next_check'] = datetime.now() - timedelta(hours=1)
-        
-        changes = monitor.check_metadata_changes()
-        
-        # Should detect status code change
+
+        # Now patch open() to fake prior metadata
+        with patch('builtins.open', mock_open(read_data=json.dumps({
+            'https://example.com': {
+                'metadata': {
+                    'status_code': 200,
+                    'headers': {'content-type': 'text/html'},
+                    'final_url': 'https://example.com'
+                }
+            }
+        }))):
+            # Force URL to be due for check
+            monitor.url_schedules['https://example.com']['next_check'] = datetime.now() - timedelta(hours=1)
+            changes = monitor.check_metadata_changes()
+
         assert len(changes) > 0
         change = changes[0]
         assert change['url'] == 'https://example.com'

@@ -1,5 +1,4 @@
 import requests
-import hashlib
 import json
 import uvicorn
 import yaml
@@ -11,7 +10,6 @@ import logging
 import os
 from fastapi import FastAPI
 from google.oauth2.service_account import Credentials
-import pandas as pd
 import gspread
 
 # Setup logging

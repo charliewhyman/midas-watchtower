@@ -1,3 +1,4 @@
+from fastapi import testclient
 import pytest
 import json
 import tempfile
@@ -7,7 +8,7 @@ from datetime import datetime, timedelta
 
 import yaml
 
-from monitor import app, AISafetyMonitor, GoogleSheetsReporter, GitHubActionsReporter
+from monitor import AISafetyMonitor, GitHubActionsReporter, GoogleSheetsReporter, app
 from fastapi.testclient import TestClient
 
 @pytest.fixture
@@ -41,7 +42,7 @@ def temp_config():
     os.unlink(temp_path)
 
 @pytest.fixture
-def temp_data_dir(self):
+def temp_data_dir():
     """Create temporary data directory"""
     with tempfile.TemporaryDirectory() as temp_dir:
         yield temp_dir    
@@ -475,46 +476,48 @@ class TestIntegration:
 
 # Test FastAPI endpoints
 class TestFastAPIEndpoints:
+    @staticmethod
     @pytest.fixture
-    def client(self):
-        """Create test client"""
+    def test_client():
+        from fastapi.testclient import TestClient
+        from monitor import app
         return TestClient(app)
 
-    def test_root_endpoint(self, client):
+    def test_root_endpoint(self, test_client):
         """Test root endpoint"""
-        response = client.get("/")
+        response = test_client.get("/")
         assert response.status_code == 200
         assert response.json()["status"] == "running"
 
-    def test_health_endpoint(self, client):
+    def test_health_endpoint(self, test_client):
         """Test health endpoint"""
-        response = client.get("/health")
+        response = test_client.get("/health")
         assert response.status_code == 200
         assert response.json()["status"] == "healthy"
         assert "timestamp" in response.json()
 
     @patch('monitor.AISafetyMonitor')
-    def test_check_now_endpoint(self, mock_monitor, client):
+    def test_check_now_endpoint(self, mock_monitor, test_client):
         """Test manual check endpoint"""
         mock_instance = Mock()
         mock_instance.run_monitoring_cycle.return_value = [{'test': 'change'}]
         mock_monitor.return_value = mock_instance
         
-        response = client.get("/check-now")
+        response = test_client.get("/check-now")
         assert response.status_code == 200
         data = response.json()
         assert data["changes_detected"] == 1
         assert "changes" in data
 
     @patch('monitor.AISafetyMonitor')
-    def test_status_endpoint(self, mock_monitor, client):
+    def test_status_endpoint(self, mock_monitor, test_client):
         """Test status endpoint"""
         mock_instance = Mock()
         mock_instance.get_urls_due_for_check.return_value = [{'url': 'https://example.com'}]
         mock_instance.url_schedules = {'https://example.com': {}}
         mock_monitor.return_value = mock_instance
         
-        response = client.get("/status")
+        response = test_client.get("/status")
         assert response.status_code == 200
         data = response.json()
         assert "due_urls" in data
@@ -522,13 +525,13 @@ class TestFastAPIEndpoints:
         assert "total_monitored" in data
 
     @patch('monitor.AISafetyMonitor')
-    def test_sheets_status_endpoint(self, mock_monitor, client):
+    def test_sheets_status_endpoint(self, mock_monitor, test_client):
         """Test sheets status endpoint"""
         mock_instance = Mock()
         mock_instance.sheets_reporter.client = Mock()
         mock_monitor.return_value = mock_instance
         
-        response = client.get("/api/sheets-status")
+        response = test_client.get("/api/sheets-status")
         assert response.status_code == 200
         data = response.json()
         assert "sheets_connected" in data

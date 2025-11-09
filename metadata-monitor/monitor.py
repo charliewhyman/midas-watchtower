@@ -10,6 +10,9 @@ from pathlib import Path
 import logging
 import os
 from fastapi import FastAPI
+from google.oauth2.service_account import Credentials
+import pandas as pd
+import gspread
 
 # Setup logging
 logging.basicConfig(
@@ -93,13 +96,6 @@ class AISafetyMonitor:
         self.setup_notifier()
         self.setup_changedetection_watches()
         self.setup_scheduled_checks()
-        self.report_generator = ReportGenerator()
-        self.cycle_stats = {
-            'start_time': None,
-            'end_time': None,
-            'urls_checked': 0,
-            'errors': 0
-        }
         
         logger.info("AI Safety Monitor initialized")
     
@@ -477,22 +473,120 @@ class AISafetyMonitor:
             'config_summary': self._get_config_summary()
         }
 
-class ReportGenerator:
-    def __init__(self, data_dir="data"):
-        self.data_dir = Path(data_dir)
-        self.reports_dir = self.data_dir / "reports"
-        self.reports_dir.mkdir(exist_ok=True)
+class GoogleSheetsReporter:
+    def __init__(self, credentials_file="google-sheets-credentials.json"):
+        self.credentials_file = credentials_file
+        self.setup_client()
     
-    def generate_monitoring_report(self, monitoring_results, changes_detected, cycle_stats):
-        """Generate comprehensive reports in multiple formats"""
-        report_data = self._compile_report_data(monitoring_results, changes_detected, cycle_stats)
+    def setup_client(self):
+        """Setup Google Sheets client"""
+        try:
+            scopes = [
+                "https://www.googleapis.com/auth/spreadsheets",
+                "https://www.googleapis.com/auth/drive"
+            ]
+            
+            creds = Credentials.from_service_account_file(
+                self.credentials_file, scopes=scopes
+            )
+            self.client = gspread.authorize(creds)
+            logger.info("Google Sheets client initialized")
+        except Exception as e:
+            logger.error(f"Failed to setup Google Sheets: {e}")
+            self.client = None
+    
+    def ensure_spreadsheet_exists(self, spreadsheet_name="AI Safety Changes Monitor"):
+        """Create or get existing spreadsheet"""
+        if not self.client:
+            return None
+            
+        try:
+            spreadsheet = self.client.open(spreadsheet_name)
+            logger.info(f"Using existing spreadsheet: {spreadsheet_name}")
+        except gspread.SpreadsheetNotFound:
+            spreadsheet = self.client.create(spreadsheet_name)
+            logger.info(f"Created new spreadsheet: {spreadsheet_name}")
         
-        # Generate different report formats
-        self._generate_json_report(report_data)
-        self._generate_markdown_summary(report_data)
-        self._generate_github_summary(report_data)
+        return spreadsheet
+    
+    def setup_sheets_structure(self, spreadsheet):
+        """Setup the sheets with proper structure"""
+        try:
+            worksheet = spreadsheet.worksheet("Changes_Log")
+            logger.info("Changes_Log sheet already exists")
+        except gspread.WorksheetNotFound:
+            worksheet = spreadsheet.add_worksheet(
+                title="Changes_Log", 
+                rows=1000, 
+                cols=11
+            )
+            worksheet.append_row([
+                "Timestamp", "URL", "Change Type", "Change Details", 
+                "Status Code", "Content Type", "Final URL", "Source",
+                "Priority", "Resolved", "Notes"
+            ])
+            logger.info("Created Changes_Log sheet")
+    
+    def log_change_to_sheets(self, change_data):
+        """Log a change to Google Sheets"""
+        if not self.client:
+            logger.error("Google Sheets client not available")
+            return False
         
-        return report_data
+        try:
+            spreadsheet = self.ensure_spreadsheet_exists()
+            if not spreadsheet:
+                return False
+            
+            self.setup_sheets_structure(spreadsheet)
+            
+            # Prepare change row
+            change_row = self.prepare_change_row(change_data)
+            
+            # Append to Changes_Log sheet
+            changes_sheet = spreadsheet.worksheet("Changes_Log")
+            changes_sheet.append_row(change_row)
+            
+            logger.info(f"Logged change to Google Sheets: {change_data['url']}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to log change to Google Sheets: {e}")
+            return False
+    
+    def prepare_change_row(self, change_data):
+        """Prepare a row for the Changes_Log sheet"""
+        changes = change_data.get('changes', {})
+        metadata = change_data.get('metadata', {})
+        
+        # Extract change types and details
+        change_types = []
+        change_details = []
+        
+        for change_type, details in changes.items():
+            change_types.append(change_type)
+            if change_type == 'content_change':
+                change_details.append("Content modified")
+            elif change_type == 'metadata_change':
+                for meta_type, meta_details in details.items():
+                    if meta_type == 'status':
+                        change_details.append(f"Status: {meta_details.get('old')}→{meta_details.get('new')}")
+                    elif meta_type == 'content_type':
+                        change_details.append(f"Content-Type: {meta_details.get('old')}→{meta_details.get('new')}")
+        
+        return [
+            change_data.get('timestamp', datetime.now().isoformat()),
+            change_data.get('url', ''),
+            ', '.join(change_types),
+            '; '.join(change_details),
+            metadata.get('status_code', ''),
+            metadata.get('headers', {}).get('content-type', ''),
+            metadata.get('final_url', ''),
+            change_data.get('change_source', ''),
+            'medium',  # Default priority
+            'FALSE',   # Not resolved
+            ''         # Notes
+        ]
 
 # FastAPI endpoints
 @app.get("/")

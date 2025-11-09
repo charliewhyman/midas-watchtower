@@ -3,6 +3,11 @@
 scheduling:
   polling_interval: 300 # 5 mins
 
+google_sheets:
+  enabled: true
+  credentials_file: "google-sheets-credentials.json"
+  spreadsheet_name: "AI Safety Changes Monitor"
+
 monitored_urls:
   # OpenAI
   - url: "https://openai.com/en-GB/policies/usage-policies/"

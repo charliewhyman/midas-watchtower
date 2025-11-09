@@ -177,7 +177,6 @@ class TestAISafetyMonitor:
             
             monitor = AISafetyMonitor(config_path=temp_config)
             assert len(monitor.config['monitored_urls']) == 2
-            assert monitor.notifier is not None
             assert monitor.sheets_reporter is not None
             assert monitor.gh_reporter is not None
 
@@ -430,8 +429,7 @@ class TestIntegration:
         """Test complete monitoring cycle with no changes detected"""
         with patch.object(monitor_with_mocks, 'check_changedetection_content_changes', return_value=[]), \
              patch.object(monitor_with_mocks, 'check_metadata_changes', return_value=[]), \
-             patch.object(monitor_with_mocks, 'sheets_reporter') as mock_sheets, \
-             patch.object(monitor_with_mocks, 'notifier') as mock_notifier:
+             patch.object(monitor_with_mocks, 'sheets_reporter') as mock_sheets:
             
             changes = monitor_with_mocks.run_monitoring_cycle()
             
@@ -452,7 +450,6 @@ class TestIntegration:
         with patch.object(monitor_with_mocks, 'check_changedetection_content_changes', return_value=test_changes), \
              patch.object(monitor_with_mocks, 'check_metadata_changes', return_value=[]), \
              patch.object(monitor_with_mocks, 'sheets_reporter') as mock_sheets, \
-             patch.object(monitor_with_mocks, 'notifier') as mock_notifier, \
              patch.object(monitor_with_mocks, 'gh_reporter') as mock_gh:
             
             changes = monitor_with_mocks.run_monitoring_cycle()

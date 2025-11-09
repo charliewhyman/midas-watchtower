@@ -178,7 +178,6 @@ class AISafetyMonitor:
         self.load_config(config_path)
         self.setup_data_directory()
         self.setup_session()
-        self.setup_notifier()
         self.setup_changedetection_watches()
         self.setup_scheduled_checks()
         self.cycle_stats = {
@@ -524,10 +523,6 @@ class AISafetyMonitor:
         # Generate JSON report for GitHub Actions artifacts
         json_report_path = self.gh_reporter.generate_json_report(all_changes, self.cycle_stats)
         logger.info(f"JSON report saved: {json_report_path}")
-        
-        # Notify if changes detected
-        if all_changes and self.notifier:
-            self.notifier.send_alert(all_changes)
         
         logger.info(f"Monitoring cycle completed. Changes: {len(all_changes)}")
         return all_changes

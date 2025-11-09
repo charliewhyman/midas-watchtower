@@ -93,6 +93,14 @@ class AISafetyMonitor:
         self.setup_notifier()
         self.setup_changedetection_watches()
         self.setup_scheduled_checks()
+        self.report_generator = ReportGenerator()
+        self.cycle_stats = {
+            'start_time': None,
+            'end_time': None,
+            'urls_checked': 0,
+            'errors': 0
+        }
+        
         logger.info("AI Safety Monitor initialized")
     
     def load_config(self, config_path):
@@ -421,6 +429,8 @@ class AISafetyMonitor:
         
         all_changes = []
         
+        self.cycle_stats['start_time'] = datetime.now()
+        
         # 1. Check for content changes via changedetection.io
         content_changes = self.check_changedetection_content_changes()
         all_changes.extend(content_changes)
@@ -432,9 +442,16 @@ class AISafetyMonitor:
         # Notify if changes detected
         if all_changes and self.notifier:
             self.notifier.send_alert(all_changes)
+            
+        # Generate reports
+        report = self.report_generator.generate_monitoring_report(
+            monitoring_results=all_changes,
+            changes_detected=all_changes,
+            cycle_stats=self.cycle_stats
+        )
         
         logger.info(f"Monitoring cycle completed. Changes: {len(all_changes)}")
-        return all_changes
+        return report
 
     def run_scheduled_monitoring(self):
         """Run scheduled monitoring"""
@@ -446,6 +463,32 @@ class AISafetyMonitor:
         while True:
             schedule.run_pending()
             time.sleep(1)
+            
+    def get_detailed_status(self):
+        """Get detailed status for API/reporting"""
+        # Compile current state for reporting
+        return {
+            'url_schedules': self.url_schedules,
+            'due_urls': self.get_urls_due_for_check(),
+            'config_summary': self._get_config_summary()
+        }
+
+class ReportGenerator:
+    def __init__(self, data_dir="data"):
+        self.data_dir = Path(data_dir)
+        self.reports_dir = self.data_dir / "reports"
+        self.reports_dir.mkdir(exist_ok=True)
+    
+    def generate_monitoring_report(self, monitoring_results, changes_detected, cycle_stats):
+        """Generate comprehensive reports in multiple formats"""
+        report_data = self._compile_report_data(monitoring_results, changes_detected, cycle_stats)
+        
+        # Generate different report formats
+        self._generate_json_report(report_data)
+        self._generate_markdown_summary(report_data)
+        self._generate_github_summary(report_data)
+        
+        return report_data
 
 # FastAPI endpoints
 @app.get("/")

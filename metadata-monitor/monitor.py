@@ -588,7 +588,8 @@ async def sheets_status():
         "last_updated": datetime.now().isoformat()
     }
 
-if __name__ == "__main__":
+def main():
+    """Main entry point for the application"""
     import os
     
     # One-shot mode for GitHub Actions
@@ -613,3 +614,6 @@ if __name__ == "__main__":
     
     # Start scheduled monitoring
     monitor.run_scheduled_monitoring()
+
+if __name__ == "__main__":
+    main()

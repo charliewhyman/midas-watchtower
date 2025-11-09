@@ -664,6 +664,15 @@ async def status():
         "total_monitored": len(monitor.url_schedules)
     }
 
+@app.get("/api/sheets-status")
+async def sheets_status():
+    """Check Google Sheets integration status"""
+    monitor = AISafetyMonitor()
+    return {
+        "sheets_connected": monitor.sheets_reporter.client is not None,
+        "last_updated": datetime.now().isoformat()
+    }
+    
 @app.post("/test-discord")
 async def test_discord():
     """Test Discord webhook"""

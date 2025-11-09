@@ -481,6 +481,14 @@ class AISafetyMonitor:
             'due_urls': self.get_urls_due_for_check(),
             'config_summary': self._get_config_summary()
         }
+        
+    def _get_config_summary(self):
+        """Get configuration summary for reporting"""
+        return {
+            'total_urls': len(self.config.get('monitored_urls', [])),
+            'discord_enabled': self.notifier is not None,
+            'sheets_enabled': self.sheets_reporter.client is not None
+        }
 
 class ReportGenerator:
     def __init__(self, data_dir="data"):

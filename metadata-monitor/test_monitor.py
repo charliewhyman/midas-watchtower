@@ -7,8 +7,45 @@ from datetime import datetime, timedelta
 
 import yaml
 
-from monitor import AISafetyMonitor, GoogleSheetsReporter, GitHubActionsReporter
+from monitor import app, AISafetyMonitor, GoogleSheetsReporter, GitHubActionsReporter
+from fastapi.testclient import TestClient
 
+@pytest.fixture
+def temp_config():
+    """Create a temporary config file for testing"""
+    config_data = {
+        'monitored_urls': [
+            {
+                'url': 'https://example.com',
+                'type': 'policy',
+                'priority': 'high',
+                'check_interval': 3600
+            },
+            {
+                'url': 'https://test.org',
+                'type': 'guideline', 
+                'priority': 'medium',
+                'check_interval': 7200
+            }
+        ],
+        'scheduling': {
+            'polling_interval': 300
+        }
+    }
+    
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
+        yaml.dump(config_data, f)
+        temp_path = f.name
+    
+    yield temp_path
+    os.unlink(temp_path)
+
+@pytest.fixture
+def temp_data_dir(self):
+    """Create temporary data directory"""
+    with tempfile.TemporaryDirectory() as temp_dir:
+        yield temp_dir    
+    
 class TestGoogleSheetsReporter:
     def test_init_no_credentials(self, caplog):
         """Test initialization without credentials file"""
@@ -133,41 +170,6 @@ class TestGitHubActionsReporter:
 
 
 class TestAISafetyMonitor:
-    @pytest.fixture
-    def temp_config(self):
-        """Create a temporary config file for testing"""
-        config_data = {
-            'monitored_urls': [
-                {
-                    'url': 'https://example.com',
-                    'type': 'policy',
-                    'priority': 'high',
-                    'check_interval': 3600
-                },
-                {
-                    'url': 'https://test.org',
-                    'type': 'guideline', 
-                    'priority': 'medium',
-                    'check_interval': 7200
-                }
-            ],
-            'scheduling': {
-                'polling_interval': 300
-            }
-        }
-        
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
-            yaml.dump(config_data, f)
-            temp_path = f.name
-        
-        yield temp_path
-        os.unlink(temp_path)
-
-    @pytest.fixture
-    def temp_data_dir(self):
-        """Create temporary data directory"""
-        with tempfile.TemporaryDirectory() as temp_dir:
-            yield temp_dir
 
     def test_init_with_config(self, temp_config, temp_data_dir):
         """Test monitor initialization with config file"""
@@ -466,8 +468,6 @@ class TestFastAPIEndpoints:
     @pytest.fixture
     def client(self):
         """Create test client"""
-        from monitor import app
-        from fastapi.testclient import TestClient
         return TestClient(app)
 
     def test_root_endpoint(self, client):
@@ -483,7 +483,7 @@ class TestFastAPIEndpoints:
         assert response.json()["status"] == "healthy"
         assert "timestamp" in response.json()
 
-    @patch('your_monitor_module.AISafetyMonitor')
+    @patch('monitor.AISafetyMonitor')
     def test_check_now_endpoint(self, mock_monitor, client):
         """Test manual check endpoint"""
         mock_instance = Mock()
@@ -496,7 +496,7 @@ class TestFastAPIEndpoints:
         assert data["changes_detected"] == 1
         assert "changes" in data
 
-    @patch('your_monitor_module.AISafetyMonitor')
+    @patch('monitor.AISafetyMonitor')
     def test_status_endpoint(self, mock_monitor, client):
         """Test status endpoint"""
         mock_instance = Mock()
@@ -511,7 +511,7 @@ class TestFastAPIEndpoints:
         assert "total_due" in data
         assert "total_monitored" in data
 
-    @patch('your_monitor_module.AISafetyMonitor')
+    @patch('monitor.AISafetyMonitor')
     def test_sheets_status_endpoint(self, mock_monitor, client):
         """Test sheets status endpoint"""
         mock_instance = Mock()

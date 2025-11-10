@@ -214,8 +214,9 @@ class AISafetyMonitor:
         """Setup requests session"""
         self.session = requests.Session()
         self.session.headers.update({
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/117.0.0.0 Safari/537.36',
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.9',
         })
     
     def get_changedetection_headers(self):
@@ -330,8 +331,15 @@ class AISafetyMonitor:
     def get_url_metadata(self, url):
         """Get basic URL metadata"""
         try:
+            # Try HEAD first (lighter)
             response = self.session.head(url, timeout=10, allow_redirects=True)
             
+            # Some sites block HEAD requests; fallback to GET
+            if response.status_code >= 400 or not response.headers:
+                response = self.session.get(url, timeout=10, allow_redirects=True, stream=True)
+                # Only read headers, not body
+                response.close()
+
             metadata = {
                 'url': url,
                 'timestamp': datetime.now().isoformat(),
@@ -339,9 +347,9 @@ class AISafetyMonitor:
                 'headers': dict(response.headers),
                 'final_url': response.url,
             }
-            
+
             return metadata
-            
+
         except Exception as e:
             logger.error(f"Error checking {url}: {e}")
             return {
@@ -350,7 +358,7 @@ class AISafetyMonitor:
                 'error': str(e),
                 'status_code': None
             }
-
+            
     def detect_metadata_changes(self, old_meta, new_meta):
         """Detect metadata changes"""
         if not old_meta:

@@ -97,7 +97,7 @@ monitored_urls:
     type: "legal"
     priority: "medium"
 
-  - url: "https://mistral.ai/privacy-policy/"
+  - url: "https://mistral.ai/terms#privacy-policy"
     check_interval: 86400
     type: "policy"
     priority: "low"
@@ -108,7 +108,7 @@ monitored_urls:
     type: "api_models"
     priority: "high"
 
-  - url: "https://docs.anthropic.com/claude/docs/models-overview"
+  - url: "https://docs.claude.com/en/docs/about-claude/models/overview"
     check_interval: 1800
     type: "api_models"
     priority: "high"

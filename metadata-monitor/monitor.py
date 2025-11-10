@@ -226,10 +226,34 @@ class AISafetyMonitor:
         if api_key:
             headers["x-api-key"] = api_key
         return headers
+    
+    def wait_for_changedetection(self, timeout=60):
+        """Wait for changedetection.io to be ready"""
+        base_url = os.getenv("CHANGEDETECTION_URL", "http://changedetection:5000")
+        headers = self.get_changedetection_headers()
+        
+        start_time = time.time()
+        while time.time() - start_time < timeout:
+            try:
+                response = requests.get(f"{base_url}/api/v1/watch", headers=headers, timeout=5)
+                if response.status_code == 200:
+                    logger.info("changedetection.io is ready!")
+                    return True
+            except Exception as e:
+                logger.debug(f"Waiting for changedetection.io... ({e})")
+                time.sleep(2)
+        
+        logger.error(f"changedetection.io not ready after {timeout} seconds")
+        return False
 
     def setup_changedetection_watches(self):
         """Ensure all URLs are monitored by changedetection.io with config intervals"""
         logger.info("Setting up changedetection.io watches with config intervals...")
+        
+        # Wait for changedetection.io to be ready
+        if not self.wait_for_changedetection():
+            logger.error("Skipping changedetection.io setup - service not available")
+            return
         
         base_url = os.getenv("CHANGEDETECTION_URL", "http://changedetection:5000")
         headers = self.get_changedetection_headers()
@@ -237,7 +261,26 @@ class AISafetyMonitor:
         # Get existing watches
         try:
             response = requests.get(f"{base_url}/api/v1/watch", headers=headers, timeout=10)
-            existing_watches = {watch['url']: watch for watch in response.json() if watch.get('tag') == 'ai-safety'}
+            if response.status_code == 200:
+                watches = response.json()
+                # Handle both response formats
+                if isinstance(watches, list) and watches and isinstance(watches[0], str):
+                    # Convert UUID list to watch objects
+                    existing_watches = {}
+                    for uuid in watches:
+                        try:
+                            watch_response = requests.get(f"{base_url}/api/v1/watch/{uuid}", headers=headers, timeout=10)
+                            if watch_response.status_code == 200:
+                                watch_data = watch_response.json()
+                                if isinstance(watch_data, dict) and watch_data.get('url'):
+                                    existing_watches[watch_data['url']] = watch_data
+                        except Exception as e:
+                            logger.warning(f"Failed to fetch watch details for {uuid}: {e}")
+                else:
+                    existing_watches = {watch['url']: watch for watch in watches if isinstance(watch, dict) and watch.get('tag') == 'ai-safety'}
+            else:
+                logger.error(f"Failed to fetch existing watches: {response.status_code}")
+                existing_watches = {}
         except Exception as e:
             logger.error(f"Failed to fetch existing watches: {e}")
             existing_watches = {}
@@ -264,7 +307,7 @@ class AISafetyMonitor:
                         if response.status_code == 200:
                             logger.info(f"Updated interval for {url}: {check_interval}s")
                         else:
-                            logger.warning(f"Failed to add {url}: {response.status_code}, response: {response.text}")
+                            logger.warning(f"Failed to update {url}: {response.status_code}, response: {response.text}")
                     except Exception as e:
                         logger.error(f"Error updating {url}: {e}")
                 else:
@@ -390,10 +433,14 @@ class AISafetyMonitor:
             }
         
         return changes
-
     def check_changedetection_content_changes(self):
         """Check changedetection.io for content changes"""
         logger.info("Checking changedetection.io for content changes...")
+        
+        # Wait for service to be ready
+        if not self.wait_for_changedetection(timeout=30):
+            logger.error("Skipping content change check - changedetection.io not available")
+            return []
         
         base_url = os.getenv("CHANGEDETECTION_URL", "http://changedetection:5000")
         headers = self.get_changedetection_headers()
@@ -407,52 +454,68 @@ class AISafetyMonitor:
             response = requests.get(f"{base_url}/api/v1/watch", headers=headers, timeout=10)
             if response.status_code == 200:
                 watches = response.json()
+                # Handle UUID list format
+                if isinstance(watches, list) and watches and isinstance(watches[0], str):
+                    logger.info(f"Received list of {len(watches)} UUIDs, fetching watch details...")
+                    watch_objects = []
+                    for uuid in watches:
+                        try:
+                            watch_response = requests.get(f"{base_url}/api/v1/watch/{uuid}", headers=headers, timeout=10)
+                            if watch_response.status_code == 200:
+                                watch_detail = watch_response.json()
+                                if isinstance(watch_detail, dict):
+                                    watch_objects.append(watch_detail)
+                        except Exception as e:
+                            logger.warning(f"Failed to fetch watch {uuid}: {e}")
+                    watches = watch_objects
+                elif not isinstance(watches, list):
+                    logger.error(f"Unexpected response format: {watches}")
+                    watches = []
             else:
-                logger.error(f"Failed to fetch watches: {response.status_code} {response.text}")
+                logger.error(f"Failed to fetch watches: {response.status_code}")
                 watches = []
             
             for watch in watches:
+                if not isinstance(watch, dict):
+                    continue
+                    
                 if watch.get('tag') == 'ai-safety':
-                    url = watch['url']
+                    url = watch.get('url')
+                    if not url:
+                        continue
 
-                    # Get watch details
-                    watch_detail = requests.get(
-                        f"{base_url}/api/v1/watch/{watch['uuid']}", 
-                        headers=headers, 
-                        timeout=10
-                    ).json()
-
-                    last_changed = watch_detail.get('last_changed')
+                    last_changed = watch.get('last_changed')
                     last_checked_str = history.get(url, {}).get('last_content_check')
 
                     # Determine if we should register a content change
                     if not last_checked_str:
-                        # First time checking this URL; treat as new
+                        # First time checking this URL
                         changes_detected.append({
                             'url': url,
                             'changes': {'content_change': {'source': 'changedetection.io', 'status': 'new_watch'}},
                             'timestamp': datetime.now().isoformat(),
                             'change_source': 'changedetection_content'
                         })
-                        # Initialize last_content_check in history
                         if url not in history:
                             history[url] = {}
                         history[url]['last_content_check'] = datetime.now().isoformat()
                     elif last_changed:
-                        # If last_changed exists, only mark as change if it's newer than last check
-                        last_changed_dt = datetime.fromisoformat(last_changed.replace('Z', '+00:00'))
-                        if last_changed_dt > datetime.fromisoformat(last_checked_str):
-                            changes_detected.append({
-                                'url': url,
-                                'changes': {'content_change': {'source': 'changedetection.io'}},
-                                'timestamp': datetime.now().isoformat(),
-                                'change_source': 'changedetection_content'
-                            })
-                            history[url]['last_content_check'] = datetime.now().isoformat()
+                        try:
+                            last_changed_dt = datetime.fromisoformat(last_changed.replace('Z', '+00:00'))
+                            if last_changed_dt > datetime.fromisoformat(last_checked_str):
+                                changes_detected.append({
+                                    'url': url,
+                                    'changes': {'content_change': {'source': 'changedetection.io'}},
+                                    'timestamp': datetime.now().isoformat(),
+                                    'change_source': 'changedetection_content'
+                                })
+                                history[url]['last_content_check'] = datetime.now().isoformat()
+                        except Exception as e:
+                            logger.error(f"Error parsing dates for {url}: {e}")
                     
-                    # Save updated history
-                    with open(self.history_file, 'w') as f:
-                        json.dump(history, f, indent=2)
+            # Save updated history
+            with open(self.history_file, 'w') as f:
+                json.dump(history, f, indent=2)
                 
         except Exception as e:
             logger.error(f"Error checking changedetection.io: {e}")

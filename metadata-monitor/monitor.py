@@ -262,9 +262,9 @@ class AISafetyMonitor:
                             timeout=10
                         )
                         if response.status_code == 200:
-                            logger.info(f"✓ Updated interval for {url}: {check_interval}s")
+                            logger.info(f"Updated interval for {url}: {check_interval}s")
                         else:
-                            logger.warning(f"✗ Failed to add {url}: {response.status_code}, response: {response.text}")
+                            logger.warning(f"Failed to add {url}: {response.status_code}, response: {response.text}")
                     except Exception as e:
                         logger.error(f"Error updating {url}: {e}")
                 else:
@@ -281,9 +281,9 @@ class AISafetyMonitor:
                 try:
                     response = requests.post(f"{base_url}/api/v1/watch", json=payload, headers=headers, timeout=10)
                     if response.status_code in [200, 201]:
-                        logger.info(f"✓ Added to changedetection.io: {url} (interval: {check_interval}s)")
+                        logger.info(f"Added to changedetection.io: {url} (interval: {check_interval}s)")
                     else:
-                        logger.warning(f"✗ Failed to add {url}: {response.status_code}")
+                        logger.warning(f"Failed to add {url}: {response.status_code}")
                 except Exception as e:
                     logger.error(f"Error adding {url}: {e}")
 
@@ -405,7 +405,11 @@ class AISafetyMonitor:
                 history = json.load(f)
             
             response = requests.get(f"{base_url}/api/v1/watch", headers=headers, timeout=10)
-            watches = response.json()
+            if response.status_code == 200:
+                watches = response.json()
+            else:
+                logger.error(f"Failed to fetch watches: {response.status_code} {response.text}")
+                watches = []
             
             for watch in watches:
                 if watch.get('tag') == 'ai-safety':

@@ -475,13 +475,11 @@ class TestIntegration:
 
 
 # Test FastAPI endpoints
+@pytest.fixture
+def test_client():
+    return TestClient(app)
+    
 class TestFastAPIEndpoints:
-    @staticmethod
-    @pytest.fixture
-    def test_client():
-        from fastapi.testclient import TestClient
-        from monitor import app
-        return TestClient(app)
 
     def test_root_endpoint(self, test_client):
         """Test root endpoint"""

@@ -1,7 +1,8 @@
 name: AI Safety Monitor
+
 on:
   schedule:
-    # Run at 6 AM, 12 PM, 6 PM UTC daily
+    # Run every 6 hours
     - cron: '0 */6 * * *'
   workflow_dispatch:
     inputs:
@@ -23,10 +24,18 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Create data directory
+      - name: Create directories
         run: |
           mkdir -p metadata-monitor/data
           mkdir -p metadata-monitor/logs
+
+      # NEW: Restore previous history artifact
+      - name: Restore previous data
+        uses: actions/download-artifact@v4
+        with:
+          name: url-history
+          path: metadata-monitor/data
+        continue-on-error: true  # Skip if none exists yet
 
       - name: Install dependencies
         run: |
@@ -39,6 +48,14 @@ jobs:
         run: |
           cd metadata-monitor
           python monitor.py
+
+      # NEW: Save updated history for next run
+      - name: Save updated history
+        uses: actions/upload-artifact@v4
+        with:
+          name: url-history
+          path: metadata-monitor/data/url_history.json
+          retention-days: 30
 
       - name: Upload monitoring data
         uses: actions/upload-artifact@v4

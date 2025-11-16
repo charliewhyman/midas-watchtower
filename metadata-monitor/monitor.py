@@ -1,3 +1,4 @@
+import sys
 import requests
 import json
 import uvicorn
@@ -12,22 +13,45 @@ from fastapi import FastAPI
 from google.oauth2.service_account import Credentials
 import gspread
 
-# Setup logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler('logs/monitor.log'),
-        logging.StreamHandler()
-    ]
-)
-logger = logging.getLogger(__name__)
+def setup_logging():
+    """Comprehensive logging setup"""
+    log_dir = Path("logs")
+    log_dir.mkdir(exist_ok=True)
+    
+    logger = logging.getLogger()
+    logger.setLevel(logging.INFO)
+    
+    # Clear any existing handlers
+    for handler in logger.handlers[:]:
+        logger.removeHandler(handler)
+    
+    # Formatter
+    formatter = logging.Formatter(
+        '%(asctime)s - %(name)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s'
+    )
+    
+    # File handler
+    file_handler = logging.FileHandler('logs/monitor.log')
+    file_handler.setFormatter(formatter)
+    
+    # Stream handler (console)
+    stream_handler = logging.StreamHandler(sys.stdout)
+    stream_handler.setFormatter(formatter)
+    
+    logger.addHandler(file_handler)
+    logger.addHandler(stream_handler)
+    
+    return logger
+
+# Initialize logging
+logger = setup_logging()
 
 app = FastAPI(title="AI Safety Metadata Monitor")
 
 class GoogleSheetsReporter:
     def __init__(self, credentials_file="google-sheets-credentials.json"):
         self.credentials_file = credentials_file
+        self.client = None
         self.setup_client()
     
     def setup_client(self):
@@ -38,46 +62,108 @@ class GoogleSheetsReporter:
                 "https://www.googleapis.com/auth/drive"
             ]
             
-            creds = Credentials.from_service_account_file(
-                self.credentials_file, scopes=scopes
-            )
-            self.client = gspread.authorize(creds)
-            logger.info("Google Sheets client initialized")
+            logger.info(f"Attempting to initialize Google Sheets client with file: {self.credentials_file}")
+            
+            # Check if credentials file exists
+            if not os.path.exists(self.credentials_file):
+                logger.error(f"Google Sheets credentials file not found: {self.credentials_file}")
+                logger.info("Current working directory: " + os.getcwd())
+                logger.info("Directory contents: " + str(os.listdir('.')))
+                return
+            
+            logger.info(f"Credentials file found: {self.credentials_file}")
+            
+            # Try to load credentials
+            try:
+                creds = Credentials.from_service_account_file(
+                    self.credentials_file, scopes=scopes
+                )
+                logger.info("Google Sheets credentials loaded successfully")
+            except Exception as cred_error:
+                logger.error(f"Failed to load credentials: {cred_error}")
+                return
+            
+            # Try to authorize
+            try:
+                self.client = gspread.authorize(creds)
+                logger.info("Google Sheets client authorized successfully")
+                
+                # Test the connection
+                self.test_connection()
+                
+            except Exception as auth_error:
+                logger.error(f"Failed to authorize Google Sheets client: {auth_error}")
+                self.client = None
+                
         except Exception as e:
-            logger.error(f"Failed to setup Google Sheets: {e}")
+            logger.error(f"Unexpected error setting up Google Sheets: {e}")
             self.client = None
+            
+    def test_connection(self):
+        """Test Google Sheets connection"""
+        try:
+            # Try to list spreadsheets to verify connection
+            spreadsheets = self.client.list_spreadsheet_files()
+            logger.info(f"Google Sheets connection test successful. Found {len(spreadsheets)} spreadsheets.")
+            return True
+        except Exception as e:
+            logger.error(f"Google Sheets connection test failed: {e}")
+            self.client = None
+            return False
     
     def ensure_spreadsheet_exists(self, spreadsheet_name="AI Safety Changes Monitor"):
-        """Create or get existing spreadsheet"""
+        """Create or get existing spreadsheet with detailed logging"""
         if not self.client:
+            logger.error("Google Sheets client not available for ensure_spreadsheet_exists")
             return None
             
         try:
+            logger.info(f"Looking for spreadsheet: {spreadsheet_name}")
             spreadsheet = self.client.open(spreadsheet_name)
             logger.info(f"Using existing spreadsheet: {spreadsheet_name}")
+            return spreadsheet
         except gspread.SpreadsheetNotFound:
-            spreadsheet = self.client.create(spreadsheet_name)
-            logger.info(f"Created new spreadsheet: {spreadsheet_name}")
-        
-        return spreadsheet
+            logger.info(f"Spreadsheet not found, creating new one: {spreadsheet_name}")
+            try:
+                spreadsheet = self.client.create(spreadsheet_name)
+                logger.info(f"Created new spreadsheet: {spreadsheet_name}")
+                return spreadsheet
+            except Exception as create_error:
+                logger.error(f"Failed to create spreadsheet: {create_error}")
+                return None
+        except Exception as e:
+            logger.error(f"Error accessing spreadsheet: {e}")
+            return None
     
     def setup_sheets_structure(self, spreadsheet):
         """Setup the sheets with proper structure"""
         try:
             worksheet = spreadsheet.worksheet("Changes_Log")
             logger.info("Changes_Log sheet already exists")
+            return worksheet
         except gspread.WorksheetNotFound:
-            worksheet = spreadsheet.add_worksheet(
-                title="Changes_Log", 
-                rows=1000, 
-                cols=11
-            )
-            worksheet.append_row([
-                "Timestamp", "URL", "Change Type", "Change Details", 
-                "Status Code", "Content Type", "Final URL", "Source",
-                "Priority", "Resolved", "Notes"
-            ])
-            logger.info("Created Changes_Log sheet")
+            logger.info("Changes_Log sheet not found, creating new one")
+            try:
+                worksheet = spreadsheet.add_worksheet(
+                    title="Changes_Log", 
+                    rows=1000, 
+                    cols=11
+                )
+                # Add headers
+                headers = [
+                    "Timestamp", "URL", "Change Type", "Change Details", 
+                    "Status Code", "Content Type", "Final URL", "Source",
+                    "Priority", "Resolved", "Notes"
+                ]
+                worksheet.append_row(headers)
+                logger.info("Created Changes_Log sheet with headers")
+                return worksheet
+            except Exception as e:
+                logger.error(f"Failed to create Changes_Log sheet: {e}")
+                return None
+        except Exception as e:
+            logger.error(f"Error setting up sheet structure: {e}")
+            return None
     
     def log_change_to_sheets(self, change_data):
         """Log a change to Google Sheets"""
@@ -86,59 +172,71 @@ class GoogleSheetsReporter:
             return False
         
         try:
+            logger.info(f"Attempting to log change to Google Sheets: {change_data.get('url', 'Unknown URL')}")
+            
             spreadsheet = self.ensure_spreadsheet_exists()
             if not spreadsheet:
+                logger.error("Failed to get or create spreadsheet")
                 return False
             
-            self.setup_sheets_structure(spreadsheet)
+            worksheet = self.setup_sheets_structure(spreadsheet)
+            if not worksheet:
+                logger.error("Failed to get or create worksheet")
+                return False
             
             # Prepare change row
             change_row = self.prepare_change_row(change_data)
             
             # Append to Changes_Log sheet
-            changes_sheet = spreadsheet.worksheet("Changes_Log")
-            changes_sheet.append_row(change_row)
+            worksheet.append_row(change_row)
             
-            logger.info(f"Logged change to Google Sheets: {change_data['url']}")
+            logger.info(f"Successfully logged change to Google Sheets: {change_data['url']}")
             return True
             
         except Exception as e:
             logger.error(f"Failed to log change to Google Sheets: {e}")
+            logger.error(f"Change data that failed: {change_data}")
             return False
     
     def prepare_change_row(self, change_data):
         """Prepare a row for the Changes_Log sheet"""
-        changes = change_data.get('changes', {})
-        metadata = change_data.get('metadata', {})
         
-        # Extract change types and details
-        change_types = []
-        change_details = []
+        try:
+            changes = change_data.get('changes', {})
+            metadata = change_data.get('metadata', {})
+            
+            # Extract change types and details
+            change_types = []
+            change_details = []
+            
+            for change_type, details in changes.items():
+                change_types.append(change_type)
+                if change_type == 'content_change':
+                    change_details.append("Content modified")
+                elif change_type == 'metadata_change':
+                    for meta_type, meta_details in details.items():
+                        if meta_type == 'status':
+                            change_details.append(f"Status: {meta_details.get('old')}→{meta_details.get('new')}")
+                        elif meta_type == 'content_type':
+                            change_details.append(f"Content-Type: {meta_details.get('old')}→{meta_details.get('new')}")
+            
+            return [
+                change_data.get('timestamp', datetime.now().isoformat()),
+                change_data.get('url', ''),
+                ', '.join(change_types),
+                '; '.join(change_details),
+                metadata.get('status_code', ''),
+                metadata.get('headers', {}).get('content-type', ''),
+                metadata.get('final_url', ''),
+                change_data.get('change_source', ''),
+                'medium',  # Default priority
+                'FALSE',   # Not resolved
+                ''         # Notes
+            ]
         
-        for change_type, details in changes.items():
-            change_types.append(change_type)
-            if change_type == 'content_change':
-                change_details.append("Content modified")
-            elif change_type == 'metadata_change':
-                for meta_type, meta_details in details.items():
-                    if meta_type == 'status':
-                        change_details.append(f"Status: {meta_details.get('old')}→{meta_details.get('new')}")
-                    elif meta_type == 'content_type':
-                        change_details.append(f"Content-Type: {meta_details.get('old')}→{meta_details.get('new')}")
-        
-        return [
-            change_data.get('timestamp', datetime.now().isoformat()),
-            change_data.get('url', ''),
-            ', '.join(change_types),
-            '; '.join(change_details),
-            metadata.get('status_code', ''),
-            metadata.get('headers', {}).get('content-type', ''),
-            metadata.get('final_url', ''),
-            change_data.get('change_source', ''),
-            'medium',  # Default priority
-            'FALSE',   # Not resolved
-            ''         # Notes
-        ]
+        except Exception as e:
+            logger.error(f"Error preparing change row: {e}")
+            return ['ERROR'] * 11  # Return error row
 
 class GitHubActionsReporter:
     """Minimal reporter for GitHub Actions artifacts"""
@@ -146,31 +244,38 @@ class GitHubActionsReporter:
         self.data_dir = Path(data_dir)
         self.reports_dir = self.data_dir / "reports"
         self.reports_dir.mkdir(exist_ok=True)
+        logger.info(f"GitHub Actions reporter initialized with data_dir: {data_dir}")
     
     def generate_json_report(self, changes_detected, cycle_stats):
         """Generate JSON report for GitHub Actions artifacts"""
-        report_data = {
-            'report_id': f"report_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
-            'report_date': datetime.now().isoformat(),
-            'changes_detected': changes_detected,
-            'cycle_stats': cycle_stats,
-            'summary': {
-                'total_changes': len(changes_detected),
+        try:
+            report_data = {
+                'report_id': f"report_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
+                'report_date': datetime.now().isoformat(),
+                'changes_detected': changes_detected,
+                'cycle_stats': cycle_stats,
+                'summary': {
+                    'total_changes': len(changes_detected),
+                }
             }
-        }
+            
+            # Save JSON report for GitHub Actions artifacts
+            report_path = self.reports_dir / f"{report_data['report_id']}.json"
+            with open(report_path, 'w') as f:
+                json.dump(report_data, f, indent=2, default=str)
+            
+            # Also create a latest.json for easy access
+            latest_path = self.reports_dir / "latest.json"
+            with open(latest_path, 'w') as f:
+                json.dump(report_data, f, indent=2, default=str)
+                
+            logger.info(f"JSON report generated: {report_path}")
+            return report_path
         
-        # Save JSON report for GitHub Actions artifacts
-        report_path = self.reports_dir / f"{report_data['report_id']}.json"
-        with open(report_path, 'w') as f:
-            json.dump(report_data, f, indent=2, default=str)
-        
-        # Also create a latest.json for easy access
-        latest_path = self.reports_dir / "latest.json"
-        with open(latest_path, 'w') as f:
-            json.dump(report_data, f, indent=2, default=str)
-        
-        return report_path
-
+        except Exception as e:
+                logger.error(f"Error generating JSON report: {e}")
+                return None
+            
 class AISafetyMonitor:
     def __init__(self, config_path="config.yaml"):
         self.load_config(config_path)
@@ -182,10 +287,11 @@ class AISafetyMonitor:
             'start_time': None,
             'end_time': None,
             'urls_checked': 0,
-            'errors': 0
+            'errors': 0,
+            'sheets_logged': 0,
+            'sheets_failed': 0
         }
         self.sheets_reporter = GoogleSheetsReporter()
-        # ADDED: Minimal GitHub Actions reporter
         self.gh_reporter = GitHubActionsReporter()
         
         logger.info("AI Safety Monitor initialized")
@@ -195,20 +301,29 @@ class AISafetyMonitor:
         try:
             with open(config_path, 'r') as f:
                 self.config = yaml.safe_load(f)
-            logger.info("Configuration loaded successfully")
+            logger.info(f"Configuration loaded successfully from {config_path}")
+            logger.info(f"Monitoring {len(self.config.get('monitored_urls', []))} URLs")
         except Exception as e:
-            logger.error(f"Error loading config: {e}")
+            logger.error(f"Error loading config from {config_path}: {e}")
             self.config = {'monitored_urls': []}
     
     def setup_data_directory(self):
         """Ensure data directory exists"""
-        Path("data").mkdir(exist_ok=True)
-        Path("logs").mkdir(exist_ok=True)
-        self.history_file = Path("data/url_history.json")
-        
-        if not self.history_file.exists():
-            with open(self.history_file, 'w') as f:
-                json.dump({}, f)
+        try:
+            Path("data").mkdir(exist_ok=True)
+            Path("logs").mkdir(exist_ok=True)
+            self.history_file = Path("data/url_history.json")
+            
+            if not self.history_file.exists():
+                with open(self.history_file, 'w') as f:
+                    json.dump({}, f)
+                logger.info("Created new url_history.json file")
+                
+            else:
+                    logger.info("Using existing url_history.json file")
+                
+        except Exception as e:
+            logger.error(f"Error setting up data directory: {e}")
     
     def setup_session(self):
         """Setup requests session"""
@@ -575,29 +690,59 @@ class AISafetyMonitor:
 
     def run_monitoring_cycle(self):
         """Run one complete monitoring cycle"""
+        logger.info("=" * 50)
         logger.info("Starting monitoring cycle...")
+        logger.info("=" * 50)
         
         all_changes = []
         
         self.cycle_stats['start_time'] = datetime.now()
+        self.cycle_stats['sheets_logged'] = 0
+        self.cycle_stats['sheets_failed'] = 0
         
-        # 1. Check for content changes via changedetection.io
-        content_changes = self.check_changedetection_content_changes()
-        all_changes.extend(content_changes)
+        try:
+            # Check for content changes via changedetection.io
+            logger.info("Step 1: Checking changedetection.io for content changes...")
+            content_changes = self.check_changedetection_content_changes()
+            all_changes.extend(content_changes)
+            logger.info(f"Found {len(content_changes)} content changes")
+            
+            # Check for metadata changes on due URLs
+            logger.info("Step 2: Checking metadata changes...")
+            metadata_changes = self.check_metadata_changes()
+            all_changes.extend(metadata_changes)
+            logger.info(f"Found {len(metadata_changes)} metadata changes")
+            
+            # Log changes to Google Sheets
+            logger.info("Step 3: Logging changes to Google Sheets...")
+            for change in all_changes:
+                success = self.sheets_reporter.log_change_to_sheets(change)
+                if success:
+                    self.cycle_stats['sheets_logged'] += 1
+                else:
+                    self.cycle_stats['sheets_failed'] += 1
+            
+            # 4. Generate JSON report for GitHub Actions
+            logger.info("Step 4: Generating JSON report...")
+            json_report_path = self.gh_reporter.generate_json_report(all_changes, self.cycle_stats)
+            
+            # Update cycle stats
+            self.cycle_stats['end_time'] = datetime.now()
+            duration = (self.cycle_stats['end_time'] - self.cycle_stats['start_time']).total_seconds()
+            self.cycle_stats['duration_seconds'] = duration
+            
+            logger.info("=" * 50)
+            logger.info("Monitoring cycle completed!")
+            logger.info(f"Total changes detected: {len(all_changes)}")
+            logger.info(f"Sheets logged: {self.cycle_stats['sheets_logged']}")
+            logger.info(f"Sheets failed: {self.cycle_stats['sheets_failed']}")
+            logger.info(f"Duration: {duration:.2f} seconds")
+            logger.info("=" * 50)
+            
+        except Exception as e:
+            logger.error(f"Monitoring cycle failed with error: {e}")
+            self.cycle_stats['errors'] += 1
         
-        # 2. Check for metadata changes on due URLs
-        metadata_changes = self.check_metadata_changes()
-        all_changes.extend(metadata_changes)
-        
-        # Log changes to Google Sheets
-        for change in all_changes:
-            self.sheets_reporter.log_change_to_sheets(change)
-        
-        # Generate JSON report for GitHub Actions artifacts
-        json_report_path = self.gh_reporter.generate_json_report(all_changes, self.cycle_stats)
-        logger.info(f"JSON report saved: {json_report_path}")
-        
-        logger.info(f"Monitoring cycle completed. Changes: {len(all_changes)}")
         return all_changes
 
     def run_scheduled_monitoring(self):
@@ -626,7 +771,7 @@ class AISafetyMonitor:
             }
         }
 
-# FastAPI endpoints (remain the same)
+# FastAPI endpoints
 @app.get("/")
 async def root():
     return {"status": "running", "service": "AI Safety Metadata Monitor"}
@@ -660,33 +805,97 @@ async def sheets_status():
         "sheets_connected": monitor.sheets_reporter.client is not None,
         "last_updated": datetime.now().isoformat()
     }
+    
+# Debugging endpoints
+@app.get("/debug/files")
+async def debug_files():
+    """Debug endpoint to check file structure"""
+    import os
+    files = {}
+    for root, dirs, filenames in os.walk('.'):
+        for filename in filenames:
+            if 'google' in filename.lower() or 'cred' in filename.lower():
+                rel_path = os.path.join(root, filename)
+                files[rel_path] = os.path.exists(rel_path)
+    return files
+
+@app.get("/debug/sheets")
+async def debug_sheets():
+    """Debug endpoint for Google Sheets status"""
+    monitor = AISafetyMonitor()
+    sheets_status = {
+        "client_available": monitor.sheets_reporter.client is not None,
+        "credentials_file": monitor.sheets_reporter.credentials_file,
+        "credentials_file_exists": os.path.exists(monitor.sheets_reporter.credentials_file),
+        "current_directory": os.getcwd(),
+        "directory_contents": os.listdir('.')
+    }
+    return sheets_status
+
+@app.get("/debug/logs")
+async def debug_logs():
+    """Get recent logs"""
+    try:
+        with open('logs/monitor.log', 'r') as f:
+            logs = f.readlines()[-100:]
+        return {"logs": logs}
+    except Exception as e:
+        return {"error": str(e)}
 
 def main():
-    """Main entry point for the application"""
-    import os
-    
-    # One-shot mode for GitHub Actions
-    if os.getenv('GITHUB_ACTIONS') == 'true':
-        print("Running one-shot monitoring cycle...")
+    """Main entry point for the application"""    
+    try:
+        # One-shot mode for GitHub Actions
+        if os.getenv('GITHUB_ACTIONS') == 'true':
+            logger.info("GitHub Actions environment detected - running one-shot mode")
+            print("Running one-shot monitoring cycle...")
+            
+            monitor = AISafetyMonitor()
+            changes = monitor.run_monitoring_cycle()
+            
+            # Detailed reporting for GitHub Actions
+            print(f"\n=== MONITORING CYCLE COMPLETED ===")
+            print(f"Changes detected: {len(changes)}")
+            print(f"Sheets successfully logged: {monitor.cycle_stats['sheets_logged']}")
+            print(f"Sheets failed: {monitor.cycle_stats['sheets_failed']}")
+            print(f"Errors: {monitor.cycle_stats['errors']}")
+            
+            if changes:
+                print(f"\n=== CHANGES DETECTED ===")
+                for change in changes:
+                    print(f"- {change['url']}: {list(change.get('changes', {}).keys())}")
+            
+            # Exit with appropriate code
+            if monitor.cycle_stats['errors'] > 0:
+                logger.warning("Monitoring completed with errors")
+                exit(1)
+            else:
+                logger.info("Monitoring completed successfully")
+                exit(0)
+        
+        # Continuous monitoring mode
+        logger.info("Starting AI Safety Metadata Monitor in continuous mode...")
         monitor = AISafetyMonitor()
-        changes = monitor.run_monitoring_cycle()
-        print(f"Completed. Changes detected: {len(changes)}")
-        exit(0)
-    
-    # Continuous monitoring mode
-    print("Starting AI Safety Metadata Monitor...")
-    monitor = AISafetyMonitor()
-    
-    # Start FastAPI server
-    import threading
-    def start_api():
-        uvicorn.run(app, host="0.0.0.0", port=8000, log_level="info")
-    
-    api_thread = threading.Thread(target=start_api, daemon=True)
-    api_thread.start()
-    
-    # Start scheduled monitoring
-    monitor.run_scheduled_monitoring()
+        
+        # Start FastAPI server
+        import threading
+        def start_api():
+            logger.info("Starting FastAPI server on port 8000...")
+            uvicorn.run(app, host="0.0.0.0", port=8000, log_level="info")
+        
+        api_thread = threading.Thread(target=start_api, daemon=True)
+        api_thread.start()
+        
+        # Start scheduled monitoring
+        logger.info("Starting scheduled monitoring...")
+        monitor.run_scheduled_monitoring()
+        
+    except Exception as e:
+        logger.error(f"Application failed to start: {e}")
+        if os.getenv('GITHUB_ACTIONS') == 'true':
+            exit(1)
+        else:
+            raise
 
 if __name__ == "__main__":
     main()

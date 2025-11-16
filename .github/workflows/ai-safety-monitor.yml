@@ -2,8 +2,8 @@ name: AI Safety Monitor
 
 on:
   schedule:
-    - cron: '0 */6 * * *'  # Run every 6 hours
-  workflow_dispatch:  # Allow manual triggers
+    - cron: '0 */6 * * *'
+  workflow_dispatch:
 
 jobs:
   monitor:
@@ -23,28 +23,37 @@ jobs:
         python -m pip install --upgrade pip
         pip install -r requirements.txt
         
-    - name: Create data directory
-      run: mkdir -p data logs
-      
-    - name: Try to download previous history (optional)
+    - name: Create directory structure
+      run: |
+        mkdir -p data logs
+        ls -la
+        
+    - name: Check for credentials file
+      run: |
+        echo "Checking for credentials file..."
+        if [ -f "google-sheets-credentials.json" ]; then
+          echo "✓ Credentials file found"
+          ls -la google-sheets-credentials.json
+        else
+          echo "✗ Credentials file not found"
+          echo "Creating empty file for testing..."
+          echo '{"test": "placeholder"}' > google-sheets-credentials.json
+        fi
+        
+    - name: Try to download previous history
       uses: actions/download-artifact@v4
       with:
         name: url-history
         path: data/
-      continue-on-error: true  # Don't fail if artifact doesn't exist
-      
+      continue-on-error: true
+        
     - name: Create default history if missing
       run: |
         if [ ! -f data/url_history.json ]; then
           echo '{}' > data/url_history.json
-        fi
-        
-    - name: Setup Google Sheets credentials
-      run: |
-        if [ -n "${{ secrets.GOOGLE_SHEETS_CREDENTIALS }}" ]; then
-          echo '${{ secrets.GOOGLE_SHEETS_CREDENTIALS }}' > google-sheets-credentials.json
+          echo "Created default url_history.json"
         else
-          echo "No Google Sheets credentials found, sheets integration will be disabled"
+          echo "Using existing url_history.json"
         fi
         
     - name: Run monitoring cycle
@@ -55,16 +64,28 @@ jobs:
       run: |
         python monitor.py
         
-    - name: Upload results as artifact
+    - name: Show logs
+      run: |
+        echo "=== MONITOR.LOG ==="
+        tail -50 logs/monitor.log || echo "No log file found"
+        
+    - name: Upload history artifact
       uses: actions/upload-artifact@v4
       with:
         name: url-history
         path: data/url_history.json
         retention-days: 7
         
-    - name: Upload reports as artifact
+    - name: Upload reports artifact
       uses: actions/upload-artifact@v4
       with:
         name: monitoring-reports
         path: data/reports/
+        retention-days: 7
+        
+    - name: Upload logs artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: monitor-logs
+        path: logs/
         retention-days: 7

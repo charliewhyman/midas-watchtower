@@ -237,7 +237,6 @@ class GoogleSheetsReporter:
     
     def prepare_change_row(self, change_data):
         """Prepare a row for the Changes_Log sheet"""
-        
         try:
             changes = change_data.get('changes', {})
             metadata = change_data.get('metadata', {})
@@ -256,15 +255,24 @@ class GoogleSheetsReporter:
                             change_details.append(f"Status: {meta_details.get('old')}→{meta_details.get('new')}")
                         elif meta_type == 'content_type':
                             change_details.append(f"Content-Type: {meta_details.get('old')}→{meta_details.get('new')}")
+                        elif meta_type == 'redirect':
+                            change_details.append(f"Redirect: {meta_details.get('old')}→{meta_details.get('new')}")
+                        elif meta_type == 'new_url':
+                            change_details.append("New URL detected")
+            
+            # Get status code and content type from metadata
+            status_code = metadata.get('status_code', '')
+            content_type = metadata.get('headers', {}).get('content-type', '')
+            final_url = metadata.get('final_url', change_data.get('url', ''))
             
             return [
                 change_data.get('timestamp', datetime.now().isoformat()),
                 change_data.get('url', ''),
-                ', '.join(change_types),
-                '; '.join(change_details),
-                metadata.get('status_code', ''),
-                metadata.get('headers', {}).get('content-type', ''),
-                metadata.get('final_url', ''),
+                ', '.join(change_types) if change_types else 'no_change',
+                '; '.join(change_details) if change_details else 'No changes detected',
+                status_code,
+                content_type,
+                final_url,
                 change_data.get('change_source', ''),
                 'medium',  # Default priority
                 'FALSE',   # Not resolved
@@ -273,8 +281,8 @@ class GoogleSheetsReporter:
         
         except Exception as e:
             logger.error(f"Error preparing change row: {e}")
-            return ['ERROR'] * 11  # Return error row
-
+            return ['ERROR'] * 11
+    
 class GitHubActionsReporter:
     def __init__(self):
         self.reports_dir = Path("data/reports")
@@ -596,33 +604,38 @@ class AISafetyMonitor:
             
     def detect_metadata_changes(self, old_meta, new_meta):
         """Detect metadata changes"""
-        if not old_meta:
-            return {'new_url': {'type': 'new_url'}}
-        
+       
         changes = {}
         
         # Status code changes
-        if old_meta.get('status_code') != new_meta.get('status_code'):
+        old_status = old_meta.get('status_code')
+        new_status = new_meta.get('status_code')
+        if old_status != new_status:
             changes['status'] = {
-                'old': old_meta.get('status_code'),
-                'new': new_meta.get('status_code')
+                'old': old_status,
+                'new': new_status
             }
+            logger.info(f"Status code changed: {old_status} -> {new_status}")
         
         # Content-type changes
-        old_type = old_meta.get('headers', {}).get('content-type')
-        new_type = new_meta.get('headers', {}).get('content-type')
+        old_type = old_meta.get('headers', {}).get('content-type', '')
+        new_type = new_meta.get('headers', {}).get('content-type', '')
         if old_type != new_type:
             changes['content_type'] = {
                 'old': old_type,
                 'new': new_type
             }
+            logger.info(f"Content-Type changed: {old_type} -> {new_type}")
         
         # Redirect changes
-        if old_meta.get('final_url') != new_meta.get('final_url'):
+        old_final = old_meta.get('final_url', '')
+        new_final = new_meta.get('final_url', '')
+        if old_final != new_final:
             changes['redirect'] = {
-                'old': old_meta.get('final_url'),
-                'new': new_meta.get('final_url')
+                'old': old_final,
+                'new': new_final
             }
+            logger.info(f"Final URL changed: {old_final} -> {new_final}")
         
         return changes
 
@@ -732,27 +745,39 @@ class AISafetyMonitor:
             logger.error(f"Error loading history: {e}")
             history = {}
         
+        # Track if we need to save history
+        history_updated = False
+    
         for due_url in due_urls:
             url = due_url['url']
             
             current_meta = self.get_url_metadata(url)
             previous_meta = history.get(url, {}).get('metadata')
             
-            changes = self.detect_metadata_changes(previous_meta, current_meta)
-            if changes:
-                changes_detected.append({
-                    'url': url,
-                    'changes': {'metadata_change': changes},
-                    'metadata': current_meta,
-                    'timestamp': datetime.now().isoformat(),
-                    'change_source': 'direct_metadata'
-                })
+            # Only detect changes if we have previous metadata
+            if previous_meta is not None:
             
-            # Update history
-            if url not in history:
-                history[url] = {}
+                changes = self.detect_metadata_changes(previous_meta, current_meta)
+                if changes:
+                    changes_detected.append({
+                        'url': url,
+                        'changes': {'metadata_change': changes},
+                        'metadata': current_meta,
+                        'timestamp': datetime.now().isoformat(),
+                        'change_source': 'direct_metadata'
+                    })
+                    logger.info(f"Metadata changes detected for {url}: {changes}")
+                    
+                else:
+                    # This is the first time we're checking this URL
+                    logger.info(f"First metadata check for {url} - storing baseline")
+            
+            # Always update the history with current metadata
+        if url not in history:
+            history[url] = {}
             history[url]['metadata'] = current_meta
             history[url]['last_metadata_check'] = datetime.now().isoformat()
+            history_updated = True 
             
             # Update schedule
             self.update_url_schedule(url)
@@ -760,9 +785,14 @@ class AISafetyMonitor:
             # Small delay between requests
             time.sleep(1)
         
-        # Save history
-        with open(self.history_file, 'w') as f:
-            json.dump(history, f, indent=2)
+         # Save history only if it was updated
+        if history_updated:
+            try:
+                with open(self.history_file, 'w') as f:
+                    json.dump(history, f, indent=2)
+                logger.info("History file updated successfully")
+            except Exception as e:
+                logger.error(f"Failed to save history file: {e}")
         
         return changes_detected
 

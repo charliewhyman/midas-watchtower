@@ -278,11 +278,7 @@ class GitHubActionsReporter:
             
 class AISafetyMonitor:
     def __init__(self, config_path="config.yaml"):
-        self.load_config(config_path)
-        self.setup_data_directory()
-        self.setup_session()
-        self.setup_changedetection_watches()
-        self.setup_scheduled_checks()
+        # Initialize cycle_stats FIRST before any other methods
         self.cycle_stats = {
             'start_time': None,
             'end_time': None,
@@ -292,6 +288,12 @@ class AISafetyMonitor:
             'sheets_failed': 0,
             'first_run': False
         }
+        
+        self.load_config(config_path)
+        self.setup_data_directory()
+        self.setup_session()
+        self.setup_changedetection_watches()
+        self.setup_scheduled_checks()
         self.sheets_reporter = GoogleSheetsReporter()
         self.gh_reporter = GitHubActionsReporter()
         
@@ -794,7 +796,7 @@ class AISafetyMonitor:
         
         while True:
             schedule.run_pending()
-            time.sleep(1)       
+            time.sleep(1)
             
     def get_detailed_status(self):
         """Get detailed status for API/reporting"""

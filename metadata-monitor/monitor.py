@@ -13,18 +13,6 @@ from fastapi import FastAPI
 from google.oauth2.service_account import Credentials
 import gspread
 
-def is_first_run(self):
-    """Check if this appears to be the first run"""
-    if not self.history_file.exists():
-        return True
-    
-    try:
-        with open(self.history_file, 'r') as f:
-            content = f.read().strip()
-            return content == '' or content == '{}' or content == 'null'
-    except:
-        return True
-    
 def setup_logging():
     """Comprehensive logging setup"""
     log_dir = Path("logs")
@@ -251,6 +239,10 @@ class GoogleSheetsReporter:
             return ['ERROR'] * 11  # Return error row
 
 class GitHubActionsReporter:
+    def __init__(self):
+        self.reports_dir = Path("data/reports")
+        self.reports_dir.mkdir(exist_ok=True, parents=True)
+        
     def generate_json_report(self, changes_detected, cycle_stats):
         """Generate JSON report for GitHub Actions artifacts"""
         try:
@@ -305,6 +297,33 @@ class AISafetyMonitor:
         
         logger.info("AI Safety Monitor initialized successfully")
     
+    def is_first_run(self):
+        """Check if this appears to be the first run"""
+        if not self.history_file.exists():
+            return True
+        
+        try:
+            with open(self.history_file, 'r') as f:
+                content = f.read().strip()
+                return content == '' or content == '{}' or content == 'null'
+        except:
+            return True
+    
+    def load_config(self, config_path):
+        """Load configuration from YAML file"""
+        try:
+            with open(config_path, 'r') as f:
+                self.config = yaml.safe_load(f)
+            logger.info(f"Configuration loaded from {config_path}")
+        except Exception as e:
+            logger.error(f"Failed to load config from {config_path}: {e}")
+            # Default configuration
+            self.config = {
+                'monitored_urls': [],
+                'scheduling': {'polling_interval': 300}
+            }
+            logger.info("Using default configuration")
+    
     def setup_data_directory(self):
         """Ensure data directory exists with proper structure"""
         try:
@@ -313,7 +332,7 @@ class AISafetyMonitor:
             self.history_file = Path("data/url_history.json")
             
             # Check if this is the first run
-            if not self.history_file.exists():
+            if self.is_first_run():
                 with open(self.history_file, 'w') as f:
                     json.dump({}, f)
                 logger.info("First run detected - created new url_history.json")
@@ -564,6 +583,7 @@ class AISafetyMonitor:
             }
         
         return changes
+
     def check_changedetection_content_changes(self):
         """Check changedetection.io for content changes"""
         logger.info("Checking changedetection.io for content changes...")
@@ -774,7 +794,7 @@ class AISafetyMonitor:
         
         while True:
             schedule.run_pending()
-            time.sleep(1)
+            time.sleep(1)       
             
     def get_detailed_status(self):
         """Get detailed status for API/reporting"""

@@ -71,25 +71,23 @@ jobs:
           echo '{}' > data/url_history.json
         fi
         
-    - name: Check for credentials file
-      run: |
-        echo "Checking for Google Sheets credentials..."
-        if [ -f "google-sheets-credentials.json" ]; then
-          echo "✓ Google Sheets credentials found"
-          echo "Credentials file size: $(wc -c < google-sheets-credentials.json) bytes"
-        else
-          echo "⚠ Google Sheets credentials not found - sheets integration will be disabled"
-          echo "Current directory: $(pwd)"
-          echo "Directory contents:"
-          ls -la
-        fi
-        
     - name: Run monitoring cycle
       env:
         CHANGEDETECTION_URL: "http://localhost:5000"
         CHANGEDETECTION_API_KEY: ${{ secrets.CHANGEDETECTION_API_KEY }}
         GITHUB_ACTIONS: 'true'
         MONITOR_RUN_TYPE: ${{ github.event.inputs.run_type }}
+        GOOGLE_SHEETS_USE_ENV: 'true'
+        GOOGLE_SHEETS_TYPE: ${{ secrets.GOOGLE_SHEETS_TYPE }}
+        GOOGLE_SHEETS_PROJECT_ID: ${{ secrets.GOOGLE_SHEETS_PROJECT_ID }}
+        GOOGLE_SHEETS_PRIVATE_KEY_ID: ${{ secrets.GOOGLE_SHEETS_PRIVATE_KEY_ID }}
+        GOOGLE_SHEETS_PRIVATE_KEY: ${{ secrets.GOOGLE_SHEETS_PRIVATE_KEY }}
+        GOOGLE_SHEETS_CLIENT_EMAIL: ${{ secrets.GOOGLE_SHEETS_CLIENT_EMAIL }}
+        GOOGLE_SHEETS_CLIENT_ID: ${{ secrets.GOOGLE_SHEETS_CLIENT_ID }}
+        GOOGLE_SHEETS_AUTH_URI: ${{ secrets.GOOGLE_SHEETS_AUTH_URI }}
+        GOOGLE_SHEETS_TOKEN_URI: ${{ secrets.GOOGLE_SHEETS_TOKEN_URI }}
+        GOOGLE_SHEETS_AUTH_PROVIDER_X509_CERT_URL: ${{ secrets.GOOGLE_SHEETS_AUTH_PROVIDER_X509_CERT_URL }}
+        GOOGLE_SHEETS_CLIENT_X509_CERT_URL: ${{ secrets.GOOGLE_SHEETS_CLIENT_X509_CERT_URL }}
       run: |
         echo "Starting monitoring cycle..."
         python monitor.py
@@ -151,11 +149,15 @@ jobs:
           fi
         fi
         
-        # Check for credentials
-        if [ -f "google-sheets-credentials.json" ]; then
-          echo "**Google Sheets**: Enabled" >> $GITHUB_STEP_SUMMARY
+        # Check Google Sheets status from logs
+        if [ -f "logs/monitor.log" ]; then
+          if grep -q "Google Sheets client authorized successfully" logs/monitor.log; then
+            echo "**Google Sheets**: ✅ Enabled and connected" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "**Google Sheets**: ❌ Disabled or connection failed" >> $GITHUB_STEP_SUMMARY
+          fi
         else
-          echo "**Google Sheets**: Disabled (no credentials)" >> $GITHUB_STEP_SUMMARY
+          echo "**Google Sheets**: ⚠ Status unknown (no logs)" >> $GITHUB_STEP_SUMMARY
         fi
         
         # Show recent changes if log exists

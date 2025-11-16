@@ -13,6 +13,18 @@ from fastapi import FastAPI
 from google.oauth2.service_account import Credentials
 import gspread
 
+def is_first_run(self):
+    """Check if this appears to be the first run"""
+    if not self.history_file.exists():
+        return True
+    
+    try:
+        with open(self.history_file, 'r') as f:
+            content = f.read().strip()
+            return content == '' or content == '{}' or content == 'null'
+    except:
+        return True
+    
 def setup_logging():
     """Comprehensive logging setup"""
     log_dir = Path("logs")
@@ -239,13 +251,6 @@ class GoogleSheetsReporter:
             return ['ERROR'] * 11  # Return error row
 
 class GitHubActionsReporter:
-    """Minimal reporter for GitHub Actions artifacts"""
-    def __init__(self, data_dir="data"):
-        self.data_dir = Path(data_dir)
-        self.reports_dir = self.data_dir / "reports"
-        self.reports_dir.mkdir(exist_ok=True)
-        logger.info(f"GitHub Actions reporter initialized with data_dir: {data_dir}")
-    
     def generate_json_report(self, changes_detected, cycle_stats):
         """Generate JSON report for GitHub Actions artifacts"""
         try:
@@ -256,25 +261,28 @@ class GitHubActionsReporter:
                 'cycle_stats': cycle_stats,
                 'summary': {
                     'total_changes': len(changes_detected),
+                    'first_run': cycle_stats.get('first_run', False),
+                    'sheets_enabled': False,
+                    'github_actions': os.getenv('GITHUB_ACTIONS') == 'true'
+                },
+                'environment': {
+                    'github_actions': os.getenv('GITHUB_ACTIONS') == 'true',
+                    'run_id': os.getenv('GITHUB_RUN_ID'),
+                    'run_attempt': os.getenv('GITHUB_RUN_ATTEMPT')
                 }
             }
             
-            # Save JSON report for GitHub Actions artifacts
+            # Save JSON report
             report_path = self.reports_dir / f"{report_data['report_id']}.json"
             with open(report_path, 'w') as f:
                 json.dump(report_data, f, indent=2, default=str)
             
-            # Also create a latest.json for easy access
-            latest_path = self.reports_dir / "latest.json"
-            with open(latest_path, 'w') as f:
-                json.dump(report_data, f, indent=2, default=str)
-                
             logger.info(f"JSON report generated: {report_path}")
             return report_path
-        
+            
         except Exception as e:
-                logger.error(f"Error generating JSON report: {e}")
-                return None
+            logger.error(f"Error generating JSON report: {e}")
+            return None
             
 class AISafetyMonitor:
     def __init__(self, config_path="config.yaml"):
@@ -289,41 +297,49 @@ class AISafetyMonitor:
             'urls_checked': 0,
             'errors': 0,
             'sheets_logged': 0,
-            'sheets_failed': 0
+            'sheets_failed': 0,
+            'first_run': False
         }
         self.sheets_reporter = GoogleSheetsReporter()
         self.gh_reporter = GitHubActionsReporter()
         
-        logger.info("AI Safety Monitor initialized")
-    
-    def load_config(self, config_path):
-        """Load configuration from YAML file"""
-        try:
-            with open(config_path, 'r') as f:
-                self.config = yaml.safe_load(f)
-            logger.info(f"Configuration loaded successfully from {config_path}")
-            logger.info(f"Monitoring {len(self.config.get('monitored_urls', []))} URLs")
-        except Exception as e:
-            logger.error(f"Error loading config from {config_path}: {e}")
-            self.config = {'monitored_urls': []}
+        logger.info("AI Safety Monitor initialized successfully")
     
     def setup_data_directory(self):
-        """Ensure data directory exists"""
+        """Ensure data directory exists with proper structure"""
         try:
             Path("data").mkdir(exist_ok=True)
             Path("logs").mkdir(exist_ok=True)
             self.history_file = Path("data/url_history.json")
             
+            # Check if this is the first run
             if not self.history_file.exists():
                 with open(self.history_file, 'w') as f:
                     json.dump({}, f)
-                logger.info("Created new url_history.json file")
-                
+                logger.info("First run detected - created new url_history.json")
+                self.cycle_stats['first_run'] = True
             else:
-                    logger.info("Using existing url_history.json file")
-                
+                # Check if history file is empty or invalid
+                try:
+                    with open(self.history_file, 'r') as f:
+                        history_data = json.load(f)
+                    if not history_data:
+                        logger.info("Empty history file detected - treating as first run")
+                        self.cycle_stats['first_run'] = True
+                    else:
+                        logger.info(f"Loaded existing history with {len(history_data)} URLs")
+                except json.JSONDecodeError:
+                    logger.warning("Invalid JSON in history file - resetting")
+                    with open(self.history_file, 'w') as f:
+                        json.dump({}, f)
+                    self.cycle_stats['first_run'] = True
+                    
         except Exception as e:
             logger.error(f"Error setting up data directory: {e}")
+            # Create emergency history file
+            with open(self.history_file, 'w') as f:
+                json.dump({}, f)
+            self.cycle_stats['first_run'] = True
     
     def setup_session(self):
         """Setup requests session"""

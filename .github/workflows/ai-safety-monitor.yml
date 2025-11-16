@@ -2,8 +2,18 @@ name: AI Safety Monitor
 
 on:
   schedule:
-    - cron: '0 */6 * * *'
+    - cron: '0 */6 * * *'  # Run every 6 hours
   workflow_dispatch:
+    inputs:
+      run_type:
+        description: 'Type of run'
+        required: true
+        default: 'standard'
+        type: choice
+        options:
+        - standard
+        - verbose
+        - debug
 
 jobs:
   monitor:
@@ -21,41 +31,54 @@ jobs:
       with:
         python-version: '3.10'
         
-    - name: Show directory structure
-      run: |
-        echo "Current directory: $(pwd)"
-        echo "Directory contents:"
-        ls -la
-        
-    - name: Install dependencies
+    - name: Install core dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install -r requirements.txt
+        pip install fastapi==0.104.1 uvicorn==0.24.0 requests==2.31.0
+        pip install pyyaml==6.0.1 schedule==1.2.0 gspread==5.11.0 google-auth==2.23.4
         
-    - name: Create directory structure
+    - name: Initialize data directory
       run: |
         mkdir -p data logs
+        echo "Data directory structure created"
         
-    - name: Check for credentials file
-      run: |
-        echo "Checking for credentials file..."
-        if [ -f "google-sheets-credentials.json" ]; then
-          echo "✓ Credentials file found"
-        else
-          echo "✗ Credentials file not found"
-        fi
-        
-    - name: Try to download previous history
+    - name: Check for and download previous history
+      id: download-history
+      continue-on-error: true
       uses: actions/download-artifact@v4
       with:
         name: url-history
-        path: metadata-monitor/data/
-      continue-on-error: true
+        path: data/
         
-    - name: Create default history if missing
+    - name: Create initial history file
+      if: steps.download-history.outcome == 'failure'
       run: |
-        if [ ! -f data/url_history.json ]; then
+        echo "Creating initial URL history file (first run or artifact expired)"
+        echo '{}' > data/url_history.json
+        echo "✓ Created initial url_history.json"
+        
+    - name: Verify history file exists
+      run: |
+        echo "Verifying URL history file..."
+        if [ -f "data/url_history.json" ]; then
+          echo "✓ url_history.json exists"
+          echo "File size: $(wc -c < data/url_history.json) bytes"
+        else
+          echo "✗ url_history.json missing - creating now"
           echo '{}' > data/url_history.json
+        fi
+        
+    - name: Check for credentials file
+      run: |
+        echo "Checking for Google Sheets credentials..."
+        if [ -f "google-sheets-credentials.json" ]; then
+          echo "✓ Google Sheets credentials found"
+          echo "Credentials file size: $(wc -c < google-sheets-credentials.json) bytes"
+        else
+          echo "⚠ Google Sheets credentials not found - sheets integration will be disabled"
+          echo "Current directory: $(pwd)"
+          echo "Directory contents:"
+          ls -la
         fi
         
     - name: Run monitoring cycle
@@ -63,12 +86,71 @@ jobs:
         CHANGEDETECTION_URL: "http://localhost:5000"
         CHANGEDETECTION_API_KEY: ${{ secrets.CHANGEDETECTION_API_KEY }}
         GITHUB_ACTIONS: 'true'
+        MONITOR_RUN_TYPE: ${{ github.event.inputs.run_type }}
       run: |
+        echo "Starting monitoring cycle..."
         python monitor.py
+        echo "Monitoring cycle completed"
         
-    - name: Upload history artifact
+    - name: Show monitoring logs
+      if: always()
+      run: |
+        echo "=== RECENT MONITOR LOGS ==="
+        if [ -f "logs/monitor.log" ]; then
+          tail -50 logs/monitor.log
+        else
+          echo "No monitor.log file found"
+        fi
+        
+    - name: Upload URL history artifact
       uses: actions/upload-artifact@v4
       with:
         name: url-history
         path: metadata-monitor/data/url_history.json
+        retention-days: 30
+        
+    - name: Upload monitoring reports
+      uses: actions/upload-artifact@v4
+      with:
+        name: monitoring-reports
+        path: metadata-monitor/data/reports/
+        retention-days: 30
+        if-no-files-found: ignore
+        
+    - name: Upload logs for debugging
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: monitor-logs
+        path: metadata-monitor/logs/
         retention-days: 7
+        if-no-files-found: ignore
+        
+    - name: Create workflow summary
+      if: always()
+      run: |
+        echo "## AI Safety Monitor Run Complete" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "**Run Details:**" >> $GITHUB_STEP_SUMMARY
+        echo "- **Trigger**: ${{ github.event_name }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Run Type**: ${{ github.event.inputs.run_type || 'standard' }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Branch**: ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Timestamp**: $(date -u)" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        
+        # Check if history was downloaded or created new
+        if [ -f "data/url_history.json" ]; then
+          HISTORY_SIZE=$(wc -c < data/url_history.json)
+          if [ $HISTORY_SIZE -lt 10 ]; then
+            echo "**History**: Created new (first run)" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "**History**: Loaded existing ($HISTORY_SIZE bytes)" >> $GITHUB_STEP_SUMMARY
+          fi
+        fi
+        
+        # Check for credentials
+        if [ -f "google-sheets-credentials.json" ]; then
+          echo "**Google Sheets**: Enabled" >> $GITHUB_STEP_SUMMARY
+        else
+          echo "**Google Sheets**: Disabled (no credentials)" >> $GITHUB_STEP_SUMMARY
+        fi

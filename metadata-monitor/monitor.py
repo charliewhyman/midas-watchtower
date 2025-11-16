@@ -888,9 +888,17 @@ async def root():
 async def health_check():
     return {"status": "healthy", "timestamp": datetime.now().isoformat()}
 
+_monitor_instance = None
+
+def get_monitor():
+    global _monitor_instance
+    if _monitor_instance is None:
+        _monitor_instance = AISafetyMonitor()
+    return _monitor_instance
+
 @app.get("/check-now")
 async def manual_check():
-    monitor = AISafetyMonitor()
+    monitor = get_monitor()
     changes = monitor.run_monitoring_cycle()
     return {"changes_detected": len(changes), "changes": changes}
 

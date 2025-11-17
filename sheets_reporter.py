@@ -145,40 +145,32 @@ class GoogleSheetsReporter:
         """Setup the sheets with proper structure"""
         try:
             worksheet = spreadsheet.worksheet("Changes_Log")
-            logger.info("Changes_Log sheet already exists")
-            return worksheet
-        except gspread.WorksheetNotFound:
-            logger.info("Changes_Log sheet not found, creating new one")
-            try:
-                worksheet = spreadsheet.add_worksheet(
-                    title="Changes_Log", 
-                    rows=1000, 
-                    cols=11
-                )
+            # Ensure headers exist
+            if worksheet.row_count == 0 or worksheet.row_values(1) == []:
                 headers = [
                     "Timestamp", "URL", "Change Type", "Change Details", 
                     "Status Code", "Content Type", "Final URL", "Source",
                     "Priority", "Resolved", "Notes"
                 ]
                 worksheet.append_row(headers)
-                logger.info("Created Changes_Log sheet with headers")
-                return worksheet
-            except Exception as e:
-                logger.error(f"Failed to create Changes_Log sheet: {e}")
-                return None
-        except Exception as e:
-            logger.error(f"Error setting up sheet structure: {e}")
-            return None
+            return worksheet
+        except gspread.WorksheetNotFound:
+            worksheet = spreadsheet.add_worksheet(title="Changes_Log", rows=1000, cols=11)
+            headers = [
+                "Timestamp", "URL", "Change Type", "Change Details", 
+                "Status Code", "Content Type", "Final URL", "Source",
+                "Priority", "Resolved", "Notes"
+            ]
+            worksheet.append_row(headers)
+            return worksheet
     
     def log_change(self, change: DetectedChange) -> bool:
-        """Log a change to Google Sheets"""
+        """Log a change to Google Sheets, ensuring headers exist first"""
         if not self.client:
             logger.error("Google Sheets client not available")
             return False
         
         try:
-            logger.info(f"Logging change to Google Sheets: {change.url}")
-            
             spreadsheet = self.ensure_spreadsheet_exists()
             if not spreadsheet:
                 logger.error("Failed to get or create spreadsheet")

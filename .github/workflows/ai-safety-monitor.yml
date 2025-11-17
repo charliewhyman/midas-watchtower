@@ -38,16 +38,15 @@ jobs:
           mkdir -p data logs
           echo "Directories created"
 
-      - name: Download previous history
-        id: download-history
-        continue-on-error: true
-        uses: actions/download-artifact@v4
+      - name: Restore URL history cache
+        id: cache-history
+        uses: actions/cache@v3
         with:
-          name: url-history
-          path: ./data/
-
-      - name: Create initial history file
-        if: steps.download-history.outcome == 'failure'
+          path: data/url_history.json
+          key: url-history-${{ github.ref_name }}
+      
+      - name: Create initial history file if missing
+        if: ${{ !steps.cache-history.outputs.cache-hit }}
         run: |
           echo '{}' > data/url_history.json
           echo "Initial URL history created"
@@ -75,12 +74,11 @@ jobs:
           print(f"Cycle {stats.cycle_id} completed: {stats.changes_detected} changes detected")
           PYTHON
 
-      - name: Upload URL history artifact
-        uses: actions/upload-artifact@v4
+      - name: Save URL history cache
+        uses: actions/cache@v3
         with:
-          name: url-history
           path: data/url_history.json
-          retention-days: 30
+          key: url-history-${{ github.ref_name }}
 
       - name: Upload monitoring reports
         uses: actions/upload-artifact@v4

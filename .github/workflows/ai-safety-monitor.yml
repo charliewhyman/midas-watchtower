@@ -38,13 +38,32 @@ jobs:
           mkdir -p data logs
           echo "Directories created"
 
+      - name: Start changedetection.io
+        run: |
+          docker run -d --name changedetection \
+            -p 5000:5000 \
+            ghcr.io/dgtlmoon/changedetection.io:latest
+
+      - name: Wait for changedetection.io
+        run: |
+          for i in {1..12}; do
+            if curl -s http://localhost:5000; then
+              echo "Changedetection ready"
+              exit 0
+            fi
+            echo "Waiting for changedetection..."
+            sleep 10
+          done
+          echo "Changedetection never became ready"
+          exit 1
+
       - name: Restore URL history cache
         id: cache-history
         uses: actions/cache@v3
         with:
           path: data/url_history.json
           key: url-history-${{ github.ref_name }}
-      
+
       - name: Create initial history file if missing
         if: ${{ !steps.cache-history.outputs.cache-hit }}
         run: |
@@ -54,6 +73,7 @@ jobs:
       - name: Run monitoring cycle
         env:
           CHANGEDETECTION_API_KEY: ${{ secrets.CHANGEDETECTION_API_KEY }}
+          CHANGEDETECTION_URL: http://localhost:5000
           GOOGLE_SHEETS_USE_ENV: 'true'
           GOOGLE_SHEETS_TYPE: ${{ secrets.GOOGLE_SHEETS_TYPE }}
           GOOGLE_SHEETS_PROJECT_ID: ${{ secrets.GOOGLE_SHEETS_PROJECT_ID }}
@@ -96,6 +116,12 @@ jobs:
           path: logs/
           retention-days: 7
           if-no-files-found: ignore
+
+      - name: Stop changedetection.io container
+        if: always()
+        run: |
+          docker stop changedetection || true
+          docker rm changedetection || true
 
       - name: Create workflow summary
         if: always()

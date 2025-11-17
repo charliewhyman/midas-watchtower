@@ -23,26 +23,14 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Setup Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.10'
+      - name: Set up Docker Compose
+        uses: docker/setup-buildx-action@v2
 
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
+      - name: Build metadata-monitor image
+        run: docker-compose build metadata-monitor
 
-      - name: Initialize directories
-        run: |
-          mkdir -p data logs
-          echo "Directories created"
-
-      - name: Start changedetection.io
-        run: |
-          docker run -d --name changedetection \
-            -p 5000:5000 \
-            ghcr.io/dgtlmoon/changedetection.io:latest
+      - name: Bring up dependent services
+        run: docker-compose up -d changedetection playwright-chrome
 
       - name: Wait for changedetection.io
         run: |
@@ -57,23 +45,10 @@ jobs:
           echo "Changedetection never became ready"
           exit 1
 
-      - name: Restore URL history cache
-        id: cache-history
-        uses: actions/cache@v3
-        with:
-          path: data/url_history.json
-          key: url-history-${{ github.ref_name }}
-
-      - name: Create initial history file if missing
-        if: ${{ !steps.cache-history.outputs.cache-hit }}
-        run: |
-          echo '{}' > data/url_history.json
-          echo "Initial URL history created"
-
-      - name: Run monitoring cycle
+      - name: Run monitoring cycle with retries
         env:
           CHANGEDETECTION_API_KEY: ${{ secrets.CHANGEDETECTION_API_KEY }}
-          CHANGEDETECTION_URL: http://localhost:5000
+          CHANGEDETECTION_URL: http://changedetection:5000
           GOOGLE_SHEETS_USE_ENV: 'true'
           GOOGLE_SHEETS_TYPE: ${{ secrets.GOOGLE_SHEETS_TYPE }}
           GOOGLE_SHEETS_PROJECT_ID: ${{ secrets.GOOGLE_SHEETS_PROJECT_ID }}
@@ -87,18 +62,22 @@ jobs:
           GOOGLE_SHEETS_CLIENT_X509_CERT_URL: ${{ secrets.GOOGLE_SHEETS_CLIENT_X509_CERT_URL }}
           MONITOR_RUN_TYPE: ${{ github.event.inputs.run_type }}
         run: |
-          python - <<'PYTHON'
-          from monitoring_service import MonitoringService
-          service = MonitoringService(config_path="config.yaml")
-          stats = service.run_cycle()
-          print(f"Cycle {stats.cycle_id} completed: {stats.changes_detected} changes detected")
-          PYTHON
-
-      - name: Save URL history cache
-        uses: actions/cache@v3
-        with:
-          path: data/url_history.json
-          key: url-history-${{ github.ref_name }}
+          for attempt in {1..3}; do
+            echo "Attempt $attempt to run monitoring container..."
+            docker-compose run --rm metadata-monitor python - <<'PYTHON'
+            from monitoring_service import MonitoringService
+            service = MonitoringService(config_path="config.yaml")
+            stats = service.run_cycle()
+            print(f"Cycle {stats.cycle_id} completed: {stats.changes_detected} changes detected")
+            PYTHON
+            if [ $? -eq 0 ]; then
+              echo "Monitoring completed successfully."
+              break
+            else
+              echo "Monitoring failed, retrying in 10s..."
+              sleep 10
+            fi
+          done
 
       - name: Upload monitoring reports
         uses: actions/upload-artifact@v4
@@ -108,7 +87,7 @@ jobs:
           retention-days: 30
           if-no-files-found: ignore
 
-      - name: Upload logs for debugging
+      - name: Upload logs
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -117,11 +96,9 @@ jobs:
           retention-days: 7
           if-no-files-found: ignore
 
-      - name: Stop changedetection.io container
+      - name: Tear down services
         if: always()
-        run: |
-          docker stop changedetection || true
-          docker rm changedetection || true
+        run: docker-compose down
 
       - name: Create workflow summary
         if: always()

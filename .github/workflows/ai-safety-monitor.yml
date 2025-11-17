@@ -69,7 +69,7 @@ jobs:
           MONITOR_RUN_TYPE: ${{ github.event.inputs.run_type }}
         run: |
           python - <<'PYTHON'
-          from monitor import MonitoringService
+          from monitoring_service import MonitoringService
           service = MonitoringService(config_path="config.yaml")
           stats = service.run_cycle()
           print(f"Cycle {stats.cycle_id} completed: {stats.changes_detected} changes detected")

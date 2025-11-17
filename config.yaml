@@ -1,0 +1,28 @@
+monitored_urls:
+  - url: "https://openai.com/safety"
+    check_interval: 3600
+    type: "policy"
+    priority: "high"
+  
+  - url: "https://deepmind.com/safety"
+    check_interval: 3600
+    type: "policy"
+    priority: "high"
+  
+  - url: "https://anthropic.com/research"
+    check_interval: 7200
+    type: "research"
+    priority: "medium"
+
+  - url: "https://www.microsoft.com/en-us/research/project/ai-safety/"
+    check_interval: 10800
+    type: "research"
+    priority: "medium"
+
+  - url: "https://safety.google/ai/"
+    check_interval: 3600
+    type: "policy"
+    priority: "high"
+
+scheduling:
+  polling_interval: 300  # 5 minutes - how often to check for due URLs

@@ -1,23 +1,51 @@
 services:
   changedetection:
-    image: ghcr.io/dgtlmoon/changedetection.io
+    image: ghcr.io/dgtlmoon/changedetection.io:latest
     container_name: changedetection
     ports:
       - "5000:5000"
     volumes:
-      - ./changedetection-data:/datastore
+      - changedetection-data:/datastore
+    environment:
+      - WEBDRIVER_URL=http://playwright-chrome:3000
+      - PLAYWRIGHT_DRIVER_URL=playwright-chrome
+    restart: unless-stopped
+    networks:
+      - appnet
+
+  playwright-chrome:
+    image: browserless/chrome:latest
+    container_name: playwright-chrome
+    restart: unless-stopped
+    environment:
+      - MAX_CONCURRENT_SESSIONS=2
+    networks:
+      - appnet
 
   metadata-monitor:
-    build: ./metadata-monitor
+    build: 
+      context: .
+      dockerfile: Dockerfile
     container_name: metadata-monitor
+    ports:
+      - "8000:8000"
     volumes:
-      - ./metadata-monitor/data:/app/data
-      - ./metadata-monitor/logs:/app/logs
-      - ./metadata-monitor/config.yaml:/app/config.yaml
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./config.yaml:/app/config.yaml
+      - ./secrets:/app/secrets:ro
     environment:
-      - CHECK_INTERVAL=3600
       - CHANGEDETECTION_URL=http://changedetection:5000
-      - CHANGEDETECTION_API_KEY=${CHANGEDETECTION_API_KEY}
+      - CHANGEDETECTION_API_KEY=${CHANGEDETECTION_API_KEY:-}
+      - GOOGLE_SHEETS_USE_ENV=${GOOGLE_SHEETS_USE_ENV:-false}
     restart: unless-stopped
     depends_on:
       - changedetection
+    networks:
+      - appnet
+
+networks:
+  appnet:
+
+volumes:
+  changedetection-data:

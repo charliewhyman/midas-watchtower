@@ -18,9 +18,6 @@ on:
 jobs:
   monitor:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: ./metadata-monitor
     
     steps:
     - name: Checkout code
@@ -48,7 +45,7 @@ jobs:
       uses: actions/download-artifact@v4
       with:
         name: url-history
-        path: ./metadata-monitor/data/
+        path: ./data/
         
     - name: Create initial history file
       if: steps.download-history.outcome == 'failure'
@@ -107,14 +104,14 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: url-history
-        path: metadata-monitor/data/url_history.json
+        path: /data/url_history.json
         retention-days: 30
         
     - name: Upload monitoring reports
       uses: actions/upload-artifact@v4
       with:
         name: monitoring-reports
-        path: metadata-monitor/data/reports/
+        path: /data/reports/
         retention-days: 30
         if-no-files-found: ignore
         
@@ -123,7 +120,7 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: monitor-logs
-        path: metadata-monitor/logs/
+        path: /logs/
         retention-days: 7
         if-no-files-found: ignore
         

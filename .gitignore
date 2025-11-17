@@ -208,8 +208,8 @@ __marimo__/
 
 # Data directories
 changedetection-data/
-metadata-monitor/data/
-metadata-monitor/logs/
+data/
+logs/
 
 # Logs
 *.log

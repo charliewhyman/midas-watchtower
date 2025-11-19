@@ -20,12 +20,23 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      # Checkout code
       - name: Checkout code
         uses: actions/checkout@v4
 
+      # Cache Docker layers
+      - name: Cache Docker layers
+        uses: actions/cache@v2
+        with:
+          path: /tmp/.buildx-cache
+          key: ${{ runner.os }}-docker-${{ hashFiles('**/Dockerfile') }}
+          restore-keys: |
+            ${{ runner.os }}-docker-
+
       # Build metadata-monitor image
       - name: Build metadata-monitor image
-        run: docker compose build metadata-monitor
+        run: |
+          docker compose build metadata-monitor
 
       # Bring up dependent services
       - name: Start changedetection.io and Playwright

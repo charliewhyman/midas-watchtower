@@ -68,16 +68,16 @@ class MonitoringService:
     
     def _setup_changedetection_with_retry(self, max_retries: int = 5, retry_delay: int = 10):
         """Setup changedetection.io watches with robust retry logic"""
-        # First, wait for changedetection to be ready
+        # First, wait for changedetection to be ready (just check if service is up)
         if not self._wait_for_changedetection(timeout=120):
             logger.error("Changedetection.io never became ready, skipping watch setup")
             return
         
-        # Now try to setup watches with retries
+        # Now try to setup watches with retries, skip the duplicate wait
         for attempt in range(max_retries):
             try:
                 logger.info(f"Attempt {attempt + 1}/{max_retries}: Setting up changedetection.io watches...")
-                self.changedetection_service.setup_watches(self.change_detector)
+                self.changedetection_service.setup_watches(self.change_detector, skip_wait=True)
                 logger.info("✅ Changedetection.io watches setup completed successfully")
                 return
                 

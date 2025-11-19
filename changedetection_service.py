@@ -28,26 +28,35 @@ class ChangedetectionService:
             headers["x-api-key"] = self.config.settings.changedetection_api_key
         return headers
     
-    def wait_for_service(self, timeout: int = 120) -> bool:
-        """Wait for changedetection.io service to be ready"""
+    def wait_for_service(self, timeout: int = 120, check_api: bool = True) -> bool:
+        """Wait for changedetection.io service to be ready
+        
+        Args:
+            timeout: Maximum time to wait in seconds
+            check_api: If True, check API endpoint. If False, just check if service is up.
+        """
         logger.info(f"⏳ Waiting for changedetection.io to be ready (timeout: {timeout}s)...")
         
         start_time = time.time()
         last_log_time = start_time
         
+        # Determine which endpoint to check
+        check_url = f"{self.base_url}/api/v1/watch" if check_api else self.base_url
+        headers = self.headers if check_api else {}
+        
         while time.time() - start_time < timeout:
             try:
-                # FIX: Use self.base_url properly
-                response = requests.get(f"{self.base_url}/api/v1/watch", headers=self.headers, timeout=5)
-                if response.status_code == 200:
-                    logger.info("✅ changedetection.io API is ready!")
+                response = requests.get(check_url, headers=headers, timeout=5)
+                # Accept 200 or 401 (unauthorized) as "service is up"
+                if response.status_code in [200, 401]:
+                    logger.info(f"✅ changedetection.io is ready! (status: {response.status_code})")
                     return True
             except requests.exceptions.ConnectionError:
                 # Normal during startup - log every 20 seconds
                 current_time = time.time()
                 if current_time - last_log_time > 20:
                     elapsed = int(current_time - start_time)
-                    logger.info(f"⏳ Waiting for changedetection.io API... ({elapsed}s/{timeout}s)")
+                    logger.info(f"⏳ Waiting for changedetection.io... ({elapsed}s/{timeout}s)")
                     last_log_time = current_time
             except Exception as e:
                 logger.debug(f"Changedetection.io not ready yet: {e}")

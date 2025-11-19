@@ -61,9 +61,11 @@ class GitHubReporter:
         if not self.is_github_actions():
             return
         
+        duration = stats.duration_seconds if stats.duration_seconds is not None else 0.0
+
         print(f"\n=== AI SAFETY MONITORING SUMMARY ===")
         print(f"Cycle ID: {stats.cycle_id}")
-        print(f"Duration: {stats.duration_seconds:.2f}s")
+        print(f"Duration: {duration:.2f}s")
         print(f"URLs checked: {stats.urls_checked}")
         print(f"Changes detected: {stats.changes_detected}")
         print(f"Sheets logged: {stats.sheets_logged}")

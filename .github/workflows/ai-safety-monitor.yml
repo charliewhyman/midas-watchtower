@@ -48,9 +48,17 @@ jobs:
       # Wait for changedetection.io to be ready
       - name: Wait for changedetection.io
         run: |
-          curl -sL https://github.com/vishnubob/wait-for-it/releases/download/v2.3.0/wait-for-it.sh -o wait-for-it.sh
-          chmod +x wait-for-it.sh
-          ./wait-for-it.sh localhost:5000 --timeout=60 -- echo "Changedetection ready"
+          echo "Waiting for changedetection.io to be ready..."
+          for i in {1..12}; do
+            if curl -s http://localhost:5000; then
+              echo "Changedetection is ready"
+              exit 0
+            fi
+            echo "Waiting for changedetection... attempt $i"
+            sleep 10
+          done
+          echo "Changedetection never became ready"
+          exit 1
 
       # Prepare data and logs directories with write permissions
       - name: Prepare directories

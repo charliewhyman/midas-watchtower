@@ -224,10 +224,12 @@ class MonitoringService:
     
     def _log_cycle_summary(self, stats: MonitoringCycleStats, changes: List[DetectedChange]) -> None:
         """Log cycle summary"""
+        duration = stats.duration_seconds if stats.duration_seconds is not None else 0.0
+        
         logger.info("=" * 50)
         logger.info("MONITORING CYCLE COMPLETED!")
         logger.info(f"Cycle ID: {stats.cycle_id}")
-        logger.info(f"Duration: {stats.duration_seconds:.2f} seconds")
+        logger.info(f"Duration: {duration:.2f} seconds")
         logger.info(f"URLs checked: {stats.urls_checked}")
         logger.info(f"Changes detected: {stats.changes_detected}")
         logger.info(f"Sheets logged: {stats.sheets_logged}")

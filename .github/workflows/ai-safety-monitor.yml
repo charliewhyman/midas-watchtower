@@ -15,66 +15,78 @@ on:
           - verbose
           - debug
 
+env:
+  DOCKER_COMPOSE_PROJECT: ai-safety-monitor-${{ github.run_id }}
+
 jobs:
   monitor:
     runs-on: ubuntu-latest
+    timeout-minutes: 60
+    
     steps:
-      # Checkout code
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # Cache Docker layers
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
       - name: Cache Docker layers
         uses: actions/cache@v4
         with:
           path: /tmp/.buildx-cache
-          key: ${{ runner.os }}-docker-${{ hashFiles('**/Dockerfile') }}
+          key: ${{ runner.os }}-docker-${{ github.sha }}
           restore-keys: |
             ${{ runner.os }}-docker-
 
-      # Pull Docker images before building to speed up subsequent builds
-      - name: Pull Docker images
-        run: docker compose pull
+      - name: Build and start services
+        run: |
+          # Build only necessary services
+          docker compose build metadata-monitor
+          
+          # Start services with project name to avoid conflicts
+          docker compose -p $DOCKER_COMPOSE_PROJECT up -d changedetection playwright-chrome
 
-      # Build metadata-monitor image
-      - name: Build metadata-monitor image
-        run: docker compose build metadata-monitor
-
-      # Bring up dependent services
-      - name: Start changedetection.io and Playwright
-        run: docker compose up -d changedetection playwright-chrome
-
-      # Wait for changedetection.io to be ready
       - name: Wait for changedetection.io
         run: |
           echo "Waiting for changedetection.io to be ready..."
-          for i in {1..12}; do
-            if curl -s http://localhost:5000 > /dev/null; then
-              echo "Changedetection is ready"
+          for i in {1..30}; do
+            if curl -s -f http://localhost:5000/api/v1/version > /dev/null; then
+              echo "Changedetection API is ready"
               exit 0
             fi
-            echo "Waiting for changedetection... attempt $i"
-            sleep 10
+            echo "Waiting for changedetection... attempt $i/30"
+            sleep 5
           done
-          echo "Changedetection never became ready"
+          echo "ERROR: Changedetection never became ready"
+          docker compose -p $DOCKER_COMPOSE_PROJECT logs changedetection
           exit 1
 
-      # Prepare data and logs directories with write permissions
       - name: Prepare directories
         run: |
           mkdir -p data/reports logs
-          chmod -R 777 data logs
+          chmod -R 755 data logs
 
-      # Run monitoring cycle with retries
       - name: Run monitoring cycle
+        env:
+          CHANGEDETECTION_API_KEY: ${{ secrets.CHANGEDETECTION_API_KEY }}
+          GOOGLE_SHEETS_PRIVATE_KEY: ${{ secrets.GOOGLE_SHEETS_PRIVATE_KEY }}
         run: |
-          export CHANGEDETECTION_API_KEY=${{ secrets.CHANGEDETECTION_API_KEY }}
-          echo "Using API key: ${CHANGEDETECTION_API_KEY:0:10}..."
+          set -e  # Exit on error
+          
+          echo "Using API key: ${CHANGEDETECTION_API_KEY:0:8}..."
+          
+          # Health check before running
+          echo "Performing health check..."
+          curl -f -H "x-api-key: $CHANGEDETECTION_API_KEY" \
+            http://localhost:5000/api/v1/watch | jq -r '.message' || true
           
           for attempt in {1..3}; do
-            echo "Attempt $attempt to run monitoring container..."
-            docker compose run --rm \
-              -e CHANGEDETECTION_API_KEY=$CHANGEDETECTION_API_KEY \
+            echo "=== Monitoring Attempt $attempt/3 ==="
+            echo "Run Type: ${{ github.event.inputs.run_type || 'standard' }}"
+            echo "SHA: ${GITHUB_SHA:0:8}"
+            
+            if docker compose -p $DOCKER_COMPOSE_PROJECT run --rm \
+              -e CHANGEDETECTION_API_KEY \
               -e CHANGEDETECTION_URL=http://changedetection:5000 \
               -e GITHUB_ACTIONS=true \
               -e GITHUB_RUN_ID=${{ github.run_id }} \
@@ -85,7 +97,7 @@ jobs:
               -e GOOGLE_SHEETS_TYPE=${{ secrets.GOOGLE_SHEETS_TYPE }} \
               -e GOOGLE_SHEETS_PROJECT_ID=${{ secrets.GOOGLE_SHEETS_PROJECT_ID }} \
               -e GOOGLE_SHEETS_PRIVATE_KEY_ID=${{ secrets.GOOGLE_SHEETS_PRIVATE_KEY_ID }} \
-              -e GOOGLE_SHEETS_PRIVATE_KEY="${{ secrets.GOOGLE_SHEETS_PRIVATE_KEY }}" \
+              -e GOOGLE_SHEETS_PRIVATE_KEY \
               -e GOOGLE_SHEETS_CLIENT_EMAIL=${{ secrets.GOOGLE_SHEETS_CLIENT_EMAIL }} \
               -e GOOGLE_SHEETS_CLIENT_ID=${{ secrets.GOOGLE_SHEETS_CLIENT_ID }} \
               -e GOOGLE_SHEETS_AUTH_URI=${{ secrets.GOOGLE_SHEETS_AUTH_URI }} \
@@ -93,47 +105,78 @@ jobs:
               -e GOOGLE_SHEETS_AUTH_PROVIDER_X509_CERT_URL=${{ secrets.GOOGLE_SHEETS_AUTH_PROVIDER_X509_CERT_URL }} \
               -e GOOGLE_SHEETS_CLIENT_X509_CERT_URL=${{ secrets.GOOGLE_SHEETS_CLIENT_X509_CERT_URL }} \
               -e MONITOR_RUN_TYPE=${{ github.event.inputs.run_type || 'standard' }} \
-              metadata-monitor python run_monitor.py
-            
-            if [ $? -eq 0 ]; then
-              echo "Monitoring completed successfully."
+              metadata-monitor python run_monitor.py; then
+              
+              echo "✅ Monitoring completed successfully on attempt $attempt"
               break
             else
-              echo "Monitoring failed, retrying in 10s..."
-              sleep 10
+              echo "❌ Monitoring failed on attempt $attempt"
+              
+              if [ $attempt -lt 3 ]; then
+                echo "Retrying in 15 seconds..."
+                sleep 15
+                
+                # Restart services if they might be in a bad state
+                echo "Restarting changedetection service..."
+                docker compose -p $DOCKER_COMPOSE_PROJECT restart changedetection
+                sleep 10
+              else
+                echo "All retry attempts failed"
+                exit 1
+              fi
             fi
           done
 
-      # Upload monitoring reports
       - name: Upload monitoring reports
         uses: actions/upload-artifact@v4
         with:
-          name: monitoring-reports
+          name: monitoring-reports-${{ github.run_id }}
           path: data/reports/
           retention-days: 30
-          if-no-files-found: ignore
+          if-no-files-found: warn
 
-      # Upload logs
       - name: Upload logs
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: monitor-logs
+          name: monitor-logs-${{ github.run_id }}
           path: logs/
           retention-days: 7
           if-no-files-found: ignore
 
-      # Tear down services
+      - name: Save service logs
+        if: always()
+        run: |
+          mkdir -p docker-logs
+          docker compose -p $DOCKER_COMPOSE_PROJECT logs changedetection > docker-logs/changedetection.log 2>&1 || true
+          docker compose -p $DOCKER_COMPOSE_PROJECT logs playwright-chrome > docker-logs/playwright.log 2>&1 || true
+
+      - name: Upload service logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: service-logs-${{ github.run_id }}
+          path: docker-logs/
+          retention-days: 7
+
       - name: Tear down services
         if: always()
-        run: docker compose down
+        run: |
+          docker compose -p $DOCKER_COMPOSE_PROJECT down -v --remove-orphans
 
-      # Workflow summary
       - name: Create workflow summary
         if: always()
         run: |
-          echo "## AI Safety Monitor Run Complete" >> $GITHUB_STEP_SUMMARY
-          echo "- Run Type: ${{ github.event.inputs.run_type || 'standard' }}" >> $GITHUB_STEP_SUMMARY
-          echo "- Branch: ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
-          echo "- Timestamp: $(date -u)" >> $GITHUB_STEP_SUMMARY
-          echo "- Run Status: ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
+          echo "## AI Safety Monitor Run Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Run Details:**" >> $GITHUB_STEP_SUMMARY
+          echo "- **Type:** ${{ github.event.inputs.run_type || 'standard' }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Branch:** ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Commit:** ${GITHUB_SHA:0:8}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Timestamp:** $(date -u +"%Y-%m-%d %H:%M:%S UTC")" >> $GITHUB_STEP_SUMMARY
+          echo "- **Status:** ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Artifacts:**" >> $GITHUB_STEP_SUMMARY
+          echo "- Monitoring reports" >> $GITHUB_STEP_SUMMARY
+          echo "- Application logs" >> $GITHUB_STEP_SUMMARY
+          echo "- Service logs" >> $GITHUB_STEP_SUMMARY

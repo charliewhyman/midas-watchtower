@@ -67,10 +67,9 @@ jobs:
 
       # Run monitoring cycle with retries
       - name: Run monitoring cycle
-        env:
-          CHANGEDETECTION_API_KEY: ${{ secrets.CHANGEDETECTION_API_KEY }}
         run: |
-          echo "Using API key: ${CHANGEDETECTION_API_KEY:0:10}..."  # Log first 10 chars for verification
+          export CHANGEDETECTION_API_KEY=${{ secrets.CHANGEDETECTION_API_KEY }}
+          echo "Using API key: ${CHANGEDETECTION_API_KEY:0:10}..."
           
           for attempt in {1..3}; do
             echo "Attempt $attempt to run monitoring container..."

@@ -65,6 +65,11 @@ jobs:
       # Run monitoring cycle with retries
       - name: Run monitoring cycle
         run: |
+          
+          # explicit network configuration
+          NETWORK_NAME=$(docker compose ps --format json | jq -r '.[0].Project' 2>/dev/null || echo "$(basename $PWD)")_appnet
+          echo "Using network: $NETWORK_NAME"
+
           for attempt in {1..3}; do
             echo "Attempt $attempt to run monitoring container..."
             docker compose run --rm\

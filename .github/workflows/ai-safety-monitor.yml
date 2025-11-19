@@ -67,23 +67,24 @@ jobs:
           chmod -R 777 data logs
 
           - name: Run monitoring cycle
-          env:
-            CHANGEDETECTION_API_KEY: ${{ secrets.CHANGEDETECTION_API_KEY }}
-          run: |
-            echo "Using API key: ${CHANGEDETECTION_API_KEY:0:10}..."  # Log first 10 chars for verification
-            
-            for attempt in {1..3}; do
-              echo "Attempt $attempt to run monitoring container..."
-              docker compose run --rm \
-                -e CHANGEDETECTION_API_KEY=$CHANGEDETECTION_API_KEY \
-                -e CHANGEDETECTION_URL=http://changedetection:5000 \
-                -e GITHUB_ACTIONS=true \
+          - name: Prepare directories
+
+      - name: Run monitoring cycle
+        env:
+          CHANGEDETECTION_API_KEY: ${{ secrets.CHANGEDETECTION_API_KEY }}
+        run: |
+          echo "Using API key: ${CHANGEDETECTION_API_KEY:0:10}..."  # Log first 10 chars for verification
+          
+          for attempt in {1..3}; do
+            echo "Attempt $attempt to run monitoring container..."
+            docker compose run --rm \
+              -e CHANGEDETECTION_API_KEY=$CHANGEDETECTION_API_KEY \
+              -e CHANGEDETECTION_URL=http://changedetection:5000 \
+              -e GITHUB_ACTIONS=true \
               -e GITHUB_RUN_ID=${{ github.run_id }} \
               -e GITHUB_RUN_ATTEMPT=${{ github.run_attempt }} \
               -e GITHUB_SHA=${{ github.sha }} \
               -e GITHUB_REF=${{ github.ref }} \
-              -e CHANGEDETECTION_API_KEY=${{ secrets.CHANGEDETECTION_API_KEY }} \
-              -e CHANGEDETECTION_URL=http://changedetection:5000 \
               -e GOOGLE_SHEETS_USE_ENV=true \
               -e GOOGLE_SHEETS_TYPE=${{ secrets.GOOGLE_SHEETS_TYPE }} \
               -e GOOGLE_SHEETS_PROJECT_ID=${{ secrets.GOOGLE_SHEETS_PROJECT_ID }} \
@@ -95,8 +96,9 @@ jobs:
               -e GOOGLE_SHEETS_TOKEN_URI=${{ secrets.GOOGLE_SHEETS_TOKEN_URI }} \
               -e GOOGLE_SHEETS_AUTH_PROVIDER_X509_CERT_URL=${{ secrets.GOOGLE_SHEETS_AUTH_PROVIDER_X509_CERT_URL }} \
               -e GOOGLE_SHEETS_CLIENT_X509_CERT_URL=${{ secrets.GOOGLE_SHEETS_CLIENT_X509_CERT_URL }} \
-              -e MONITOR_RUN_TYPE=${{ github.event.inputs.run_type }} \
+              -e MONITOR_RUN_TYPE=${{ github.event.inputs.run_type || 'standard' }} \
               metadata-monitor python run_monitor.py
+            
             if [ $? -eq 0 ]; then
               echo "Monitoring completed successfully."
               break

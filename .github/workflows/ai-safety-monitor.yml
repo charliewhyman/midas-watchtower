@@ -66,6 +66,47 @@ jobs:
           mkdir -p data/reports logs
           chmod -R 777 data logs
 
+      # Retrieve API key (from secrets first, then from settings page if not available)
+      - name: Retrieve API key
+        run: |
+          echo "Retrieving API key..."
+          
+          # Use API key from secrets if available
+          if [ -n "${{ secrets.CHANGEDETECTION_API_KEY }}" ]; then
+            echo "Using API key from secrets..."
+            echo "CHANGEDETECTION_API_KEY=${{ secrets.CHANGEDETECTION_API_KEY }}" >> $GITHUB_ENV
+
+            # Test if the API key works by making a request
+            response=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:5000/api/v1/monitor?key=${{ secrets.CHANGEDETECTION_API_KEY }})
+            if [ "$response" -ne 200 ]; then
+              echo "API key from secrets did not work (HTTP status: $response), attempting to scrape the key..."
+              # Scrape the HTML to find the API key
+              HTML_RESPONSE=$(curl -s http://localhost:5000/settings)
+              API_KEY=$(echo "$HTML_RESPONSE" | grep -oP '(?<=<span id="api-key">)[^<]+' )
+              if [ -n "$API_KEY" ]; then
+                echo "API key found in settings page."
+                echo "CHANGEDETECTION_API_KEY=$API_KEY" >> $GITHUB_ENV
+              else
+                echo "API key could not be retrieved from settings page."
+                exit 1
+              fi
+            else
+              echo "API key from secrets is working."
+            fi
+          else
+            echo "API key not found in secrets, attempting to extract from settings page..."
+            # Scrape the HTML to find the API key
+            HTML_RESPONSE=$(curl -s http://localhost:5000/settings)
+            API_KEY=$(echo "$HTML_RESPONSE" | grep -oP '(?<=<span id="api-key">)[^<]+' )
+            if [ -n "$API_KEY" ]; then
+              echo "API key found in settings page."
+              echo "CHANGEDETECTION_API_KEY=$API_KEY" >> $GITHUB_ENV
+            else
+              echo "API key could not be retrieved from settings page."
+              exit 1
+            fi
+          fi
+
       # Run monitoring cycle with retries
       - name: Run monitoring cycle
         run: |
@@ -81,6 +122,7 @@ jobs:
               -e GITHUB_RUN_ATTEMPT=${{ github.run_attempt }} \
               -e GITHUB_SHA=${{ github.sha }} \
               -e GITHUB_REF=${{ github.ref }} \
+              -e CHANGEDETECTION_API_KEY=${{ env.CHANGEDETECTION_API_KEY }} \
               -e CHANGEDETECTION_URL=http://changedetection:5000 \
               -e GOOGLE_SHEETS_USE_ENV=true \
               -e GOOGLE_SHEETS_TYPE=${{ secrets.GOOGLE_SHEETS_TYPE }} \

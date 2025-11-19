@@ -125,7 +125,7 @@ jobs:
         run: |
           # Make sure the correct API key is used
           echo "Using API key: $API_KEY"
-          
+
           # Explicit network configuration
           NETWORK_NAME=$(docker compose ps --format json | jq -r '.[0].Project' 2>/dev/null || echo "$(basename $PWD)")_appnet
           echo "Using network: $NETWORK_NAME"
@@ -138,7 +138,7 @@ jobs:
               -e GITHUB_RUN_ATTEMPT=${{ github.run_attempt }} \
               -e GITHUB_SHA=${{ github.sha }} \
               -e GITHUB_REF=${{ github.ref }} \
-              -e CHANGEDETECTION_API_KEY=${{ env.CHANGEDETECTION_API_KEY }} \
+              -e CHANGEDETECTION_API_KEY=${{ secrets.CHANGEDETECTION_API_KEY }} \
               -e CHANGEDETECTION_URL=http://changedetection:5000 \
               -e GOOGLE_SHEETS_USE_ENV=true \
               -e GOOGLE_SHEETS_TYPE=${{ secrets.GOOGLE_SHEETS_TYPE }} \

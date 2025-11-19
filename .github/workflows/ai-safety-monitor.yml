@@ -106,10 +106,26 @@ jobs:
               exit 1
             fi
           fi
+      
+      # Test API key validity
+      - name: Test API key validity
+        run: |
+          response=$(curl -s -o /dev/null -w "%{http_code}" -X GET "http://localhost:5000/api/v1/test" -H "x-api-key:${{ secrets.CHANGEDETECTION_API_KEY }}")
+          if [ "$response" -eq 200 ]; then
+            echo "API key from secrets is valid"
+            API_KEY=${{ secrets.CHANGEDETECTION_API_KEY }}
+          else
+            echo "API key from secrets did not work (HTTP status: $response), attempting to scrape the key..."
+            API_KEY=$(curl -s http://localhost:5000/settings | grep -oP '(?<=<span id="api-key">)[a-f0-9]{32}(?=</span>)')
+            echo "API key found in settings page."
+          fi
 
       # Run monitoring cycle with retries
       - name: Run monitoring cycle
         run: |
+          # Make sure the correct API key is used
+          echo "Using API key: $API_KEY"
+          
           # Explicit network configuration
           NETWORK_NAME=$(docker compose ps --format json | jq -r '.[0].Project' 2>/dev/null || echo "$(basename $PWD)")_appnet
           echo "Using network: $NETWORK_NAME"

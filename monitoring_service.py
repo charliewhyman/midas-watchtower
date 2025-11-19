@@ -105,6 +105,7 @@ class MonitoringService:
         logger.info("=" * 50)
         
         all_changes: List[DetectedChange] = []
+        urls_checked = 0  # Track this locally
         
         try:
             # Step 1: Check for content changes via changedetection.io
@@ -114,8 +115,9 @@ class MonitoringService:
             
             # Step 2: Check for metadata changes on due URLs
             logger.info("Step 2: Checking metadata changes...")
-            metadata_changes = self._check_metadata_changes()
+            metadata_changes, checked_count = self._check_metadata_changes()  # Return count
             all_changes.extend(metadata_changes)
+            urls_checked = checked_count
             
             # Step 3: Log changes to Google Sheets
             logger.info("Step 3: Logging changes to Google Sheets...")
@@ -130,10 +132,10 @@ class MonitoringService:
             # Update final statistics
             stats.end_time = datetime.now()
             stats.duration_seconds = (stats.end_time - stats.start_time).total_seconds()
-            stats.urls_checked = len(self.scheduler.get_due_urls())
+            stats.urls_checked = urls_checked  # Use the actual count
             stats.changes_detected = len(all_changes)
-            stats.errors = sheets_results['failed']  # Could be expanded to track other errors
-            
+            stats.errors = sheets_results['failed']
+                
             # Print summary
             self._log_cycle_summary(stats, all_changes)
             
@@ -145,18 +147,24 @@ class MonitoringService:
             stats.end_time = datetime.now()
             return stats
     
-    def _check_metadata_changes(self) -> List[DetectedChange]:
-        """Check for metadata changes on due URLs"""
+    def _check_metadata_changes(self) -> tuple[List[DetectedChange], int]:
+        """Check for metadata changes on due URLs
+        
+        Returns:
+            Tuple of (changes_detected, urls_checked_count)
+        """
         due_urls = self.scheduler.get_due_urls()
         changes_detected = []
+        urls_checked = 0
         
         if not due_urls:
-            return changes_detected
+            return changes_detected, urls_checked
         
         logger.info(f"Checking metadata for {len(due_urls)} due URLs")
         
         for due_url in due_urls:
             url = due_url['url']
+            urls_checked += 1  # Count each URL we actually check
             
             try:
                 # Get current metadata
@@ -190,7 +198,7 @@ class MonitoringService:
         # Save history after processing all URLs
         self.change_detector.save_history()
         
-        return changes_detected
+        return changes_detected, urls_checked
     
     def _log_changes_to_sheets(self, changes: List[DetectedChange]) -> Dict[str, int]:
         """Log changes to Google Sheets and return results"""

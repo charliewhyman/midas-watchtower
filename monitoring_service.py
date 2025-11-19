@@ -37,7 +37,7 @@ class MonitoringService:
         
         logger.info("Monitoring service initialized successfully")
     
-    def _wait_for_changedetection(self, timeout: int = 120) -> bool:
+    def _wait_for_changedetection(self, timeout: int = 10) -> bool:
         """Wait for changedetection.io to be ready"""
         logger.info(f"Waiting for changedetection.io to be ready (timeout: {timeout}s)...")
         
@@ -69,7 +69,7 @@ class MonitoringService:
     def _setup_changedetection_with_retry(self, max_retries: int = 5, retry_delay: int = 10):
         """Setup changedetection.io watches with robust retry logic"""
         # First, wait for changedetection to be ready (just check if service is up)
-        if not self._wait_for_changedetection(timeout=120):
+        if not self._wait_for_changedetection(timeout=10):
             logger.error("Changedetection.io never became ready, skipping watch setup")
             return
         

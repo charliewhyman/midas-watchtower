@@ -28,7 +28,7 @@ class ChangedetectionService:
         if api_key and api_key.strip():  # Only use if actually set
             headers["x-api-key"] = api_key
     
-    def wait_for_service(self, timeout: int = 120, check_api: bool = True) -> bool:
+    def wait_for_service(self, timeout: int = 10, check_api: bool = True) -> bool:
         """Wait for changedetection.io service to be ready
         
         Args:
@@ -69,10 +69,6 @@ class ChangedetectionService:
     def setup_watches(self, change_detector: 'ChangeDetector') -> None:
         """Ensure all URLs are monitored by changedetection.io"""
         logger.info("🔧 Setting up changedetection.io watches...")
-        
-        if not self.wait_for_service(timeout=120):
-            logger.error("Skipping changedetection.io setup - service not available")
-            return
         
         try:
             existing_watches = self._get_existing_watches()

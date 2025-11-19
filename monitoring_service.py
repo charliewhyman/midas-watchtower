@@ -77,7 +77,7 @@ class MonitoringService:
         for attempt in range(max_retries):
             try:
                 logger.info(f"Attempt {attempt + 1}/{max_retries}: Setting up changedetection.io watches...")
-                self.changedetection_service.setup_watches(self.change_detector, skip_wait=True)
+                self.changedetection_service.setup_watches(self.change_detector)
                 logger.info("✅ Changedetection.io watches setup completed successfully")
                 return
                 

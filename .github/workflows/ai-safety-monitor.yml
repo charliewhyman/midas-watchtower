@@ -71,21 +71,12 @@ jobs:
           CHANGEDETECTION_API_KEY: ${{ secrets.CHANGEDETECTION_API_KEY }}
           GOOGLE_SHEETS_PRIVATE_KEY: ${{ secrets.GOOGLE_SHEETS_PRIVATE_KEY }}
         run: |
-          set -e  # Exit on error
-          
-          echo "Using API key: ${CHANGEDETECTION_API_KEY:0:8}..."
-          
-          # Health check before running
-          echo "Performing health check..."
-          curl -f -H "x-api-key: $CHANGEDETECTION_API_KEY" \
-            http://localhost:5000/api/v1/watch | jq -r '.message' || true
+          echo "Starting monitoring cycle..."
           
           for attempt in {1..3}; do
-            echo "=== Monitoring Attempt $attempt/3 ==="
-            echo "Run Type: ${{ github.event.inputs.run_type || 'standard' }}"
-            echo "SHA: ${GITHUB_SHA:0:8}"
+            echo "Attempt $attempt/3"
             
-            if docker compose -p $DOCKER_COMPOSE_PROJECT run --rm \
+            docker compose -p $DOCKER_COMPOSE_PROJECT run --rm \
               -e CHANGEDETECTION_API_KEY \
               -e CHANGEDETECTION_URL=http://changedetection:5000 \
               -e GITHUB_ACTIONS=true \
@@ -105,26 +96,10 @@ jobs:
               -e GOOGLE_SHEETS_AUTH_PROVIDER_X509_CERT_URL=${{ secrets.GOOGLE_SHEETS_AUTH_PROVIDER_X509_CERT_URL }} \
               -e GOOGLE_SHEETS_CLIENT_X509_CERT_URL=${{ secrets.GOOGLE_SHEETS_CLIENT_X509_CERT_URL }} \
               -e MONITOR_RUN_TYPE=${{ github.event.inputs.run_type || 'standard' }} \
-              metadata-monitor python run_monitor.py; then
+              metadata-monitor python run_monitor.py && break
               
-              echo "✅ Monitoring completed successfully on attempt $attempt"
-              break
-            else
-              echo "❌ Monitoring failed on attempt $attempt"
-              
-              if [ $attempt -lt 3 ]; then
-                echo "Retrying in 15 seconds..."
-                sleep 15
-                
-                # Restart services if they might be in a bad state
-                echo "Restarting changedetection service..."
-                docker compose -p $DOCKER_COMPOSE_PROJECT restart changedetection
-                sleep 10
-              else
-                echo "All retry attempts failed"
-                exit 1
-              fi
-            fi
+            echo "Attempt $attempt failed, retrying..."
+            sleep 10
           done
 
       - name: Upload monitoring reports

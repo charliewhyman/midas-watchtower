@@ -24,9 +24,9 @@ class ChangedetectionService:
     def _get_headers(self) -> Dict[str, str]:
         """Get API headers with authentication"""
         headers = {"Content-Type": "application/json"}
-        if self.config.settings.changedetection_api_key:
-            headers["x-api-key"] = self.config.settings.changedetection_api_key
-        return headers
+        api_key = self.config.settings.changedetection_api_key
+        if api_key and api_key.strip():  # Only use if actually set
+            headers["x-api-key"] = api_key
     
     def wait_for_service(self, timeout: int = 120, check_api: bool = True) -> bool:
         """Wait for changedetection.io service to be ready

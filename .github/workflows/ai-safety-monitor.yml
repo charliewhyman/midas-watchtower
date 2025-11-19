@@ -18,7 +18,6 @@ on:
 jobs:
   monitor:
     runs-on: ubuntu-latest
-
     steps:
       # Checkout code
       - name: Checkout code
@@ -50,7 +49,7 @@ jobs:
         run: |
           echo "Waiting for changedetection.io to be ready..."
           for i in {1..12}; do
-            if curl -s http://localhost:5000; then
+            if curl -s http://localhost:5000 > /dev/null; then
               echo "Changedetection is ready"
               exit 0
             fi
@@ -66,9 +65,7 @@ jobs:
           mkdir -p data/reports logs
           chmod -R 777 data logs
 
-          - name: Run monitoring cycle
-          - name: Prepare directories
-
+      # Run monitoring cycle with retries
       - name: Run monitoring cycle
         env:
           CHANGEDETECTION_API_KEY: ${{ secrets.CHANGEDETECTION_API_KEY }}
@@ -137,9 +134,7 @@ jobs:
         if: always()
         run: |
           echo "## AI Safety Monitor Run Complete" >> $GITHUB_STEP_SUMMARY
-          echo "- Run Type: ${{ github.event.inputs.run_type }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Run Type: ${{ github.event.inputs.run_type || 'standard' }}" >> $GITHUB_STEP_SUMMARY
           echo "- Branch: ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
           echo "- Timestamp: $(date -u)" >> $GITHUB_STEP_SUMMARY
           echo "- Run Status: ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
-          echo "- Docker Version: $(docker --version)" >> $GITHUB_STEP_SUMMARY
-          echo "- Node Version: $(node --version)" >> $GITHUB_STEP_SUMMARY

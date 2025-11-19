@@ -72,17 +72,26 @@ class ChangedetectionService:
         
         try:
             existing_watches = self._get_existing_watches()
+            
+            # Check if we got auth errors
+            if existing_watches is None:  # Modify _get_existing_watches to return None on auth error
+                logger.error("❌ Authentication failed - cannot setup watches")
+                raise Exception("changedetection.io authentication failed")
+                
             self._sync_watches(existing_watches, change_detector)
         except Exception as e:
             logger.error(f"Failed to setup changedetection.io watches: {e}")
+            raise  # Re-raise to fail the workflow
     
     def _get_existing_watches(self) -> Dict[str, Dict[str, Any]]:
         """Get existing watches from changedetection.io"""
         try:
-            # FIX: Use self.base_url properly
             response = requests.get(f"{self.base_url}/api/v1/watch", headers=self.headers, timeout=10)
             
-            if response.status_code != 200:
+            if response.status_code == 403:
+                logger.error(f"❌ Authentication failed: {response.text}")
+                return None  # Signal auth failure
+            elif response.status_code != 200:
                 logger.error(f"Failed to fetch watches: {response.status_code}")
                 return {}
             

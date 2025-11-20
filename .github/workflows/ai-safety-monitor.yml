@@ -40,6 +40,26 @@ jobs:
           echo "📁 Scripts directory structure:"
           ls -la .github/scripts/ || echo "No scripts directory"
 
+      - name: Download previous monitoring data
+        uses: actions/download-artifact@v4
+        with:
+          name: monitoring-data
+          path: data/
+          pattern: monitoring-data-*
+          merge-multiple: true
+        continue-on-error: true  # Allow first run to succeed
+
+      - name: Restore data permissions and structure
+        run: |
+          echo "🔧 Setting up data directories..."
+          mkdir -p data/datastore data/reports data/logs
+          chmod -R 777 data/ || true
+          
+          echo "📊 Existing data content:"
+          find data/ -type f -name "*.json" | head -10 || echo "No existing data files"
+          echo "Datastore files:"
+          ls -la data/datastore/ 2>/dev/null || echo "No datastore files yet"
+
       - name: Verify prerequisites and scripts
         run: |
           echo "🔧 Checking prerequisites..."
@@ -115,18 +135,6 @@ jobs:
           driver: docker-container
           buildkitd-flags: --debug
 
-      - name: Cache Docker layers
-        uses: actions/cache@v4
-        id: docker-cache
-        with:
-          path: |
-            ~/.cache/docker
-            /tmp/.buildx-cache
-            /var/lib/docker
-          key: ${{ runner.os }}-docker-${{ hashFiles('docker-compose.yml', 'Dockerfile', 'requirements.txt') }}
-          restore-keys: |
-            ${{ runner.os }}-docker-
-
       - name: Cache Python packages
         uses: actions/cache@v4
         id: pip-cache
@@ -139,7 +147,31 @@ jobs:
           key: ${{ runner.os }}-python-${{ hashFiles('**/requirements.txt') }}
           restore-keys: |
             ${{ runner.os }}-python-
-                  
+
+      - name: Cache Docker layers
+        uses: actions/cache@v4
+        id: docker-cache
+        with:
+          path: |
+            ~/.cache/docker
+            /tmp/.buildx-cache
+            /var/lib/docker
+          key: ${{ runner.os }}-docker-${{ hashFiles('docker-compose.yml', 'Dockerfile', 'requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-docker-
+
+      - name: Verify cache status
+        run: |
+          echo "🔍 Cache Status:"
+          echo "Python cache hit: ${{ steps.pip-cache.outputs.cache-hit }}"
+          echo "Docker cache hit: ${{ steps.docker-cache.outputs.cache-hit }}"
+          
+          if [[ "${{ steps.docker-cache.outputs.cache-hit }}" != 'true' ]]; then
+            echo "Docker cache miss - this is normal for first run or when files change"
+          else
+            echo "✅ Docker cache hit - layers will be reused"
+          fi
+
       - name: Build and start services
         run: |
           source .github/scripts/logger.sh
@@ -156,7 +188,6 @@ jobs:
         run: |
           .github/scripts/wait-for-service.sh "$CHANGEDETECTION_URL" "$MAX_WAIT_ATTEMPTS" "$WAIT_INTERVAL"
 
-      
       - name: Extract API key from changedetection datastore
         id: extract-api-key
         run: |
@@ -193,18 +224,57 @@ jobs:
           source .github/scripts/logger.sh
           
           log_info "Creating required directories..."
-          mkdir -p "$REPORT_DIR" "$LOG_DIR" "$DOCKER_LOG_DIR" "data"
+          mkdir -p "$REPORT_DIR" "$LOG_DIR" "$DOCKER_LOG_DIR" "data/datastore" "data/reports"
           chmod -R 777 "$REPORT_DIR" "$LOG_DIR" "$DOCKER_LOG_DIR" "data"
           log_success "Directories prepared"
+
+      - name: Check for existing data and set first run flag
+        id: check-first-run
+        run: |
+          echo "🔍 Checking for existing monitoring data..."
+          
+          # Check if we have a valid datastore with watches
+          if [ -f "data/datastore/datastore.json" ]; then
+            echo "📁 Found datastore.json file"
+            # Check if datastore has watches configured
+            if command -v jq >/dev/null 2>&1; then
+              watch_count=$(jq '.watches | length' data/datastore/datastore.json 2>/dev/null || echo "0")
+              echo "Watches found: $watch_count"
+              
+              if [ "$watch_count" -gt 0 ]; then
+                echo "FIRST_RUN=false" >> $GITHUB_ENV
+                echo "first_run=false" >> $GITHUB_OUTPUT
+                echo "✅ Continuing from existing datastore with $watch_count watches"
+                exit 0
+              fi
+            fi
+          fi
+          
+          # Check for previous reports
+          if ls data/reports/cycle_*.json 1> /dev/null 2>&1; then
+            report_count=$(ls data/reports/cycle_*.json 2>/dev/null | wc -l)
+            echo "Previous reports found: $report_count"
+            echo "FIRST_RUN=false" >> $GITHUB_ENV
+            echo "first_run=false" >> $GITHUB_OUTPUT
+            echo "✅ Continuing from previous run with $report_count reports"
+          else
+            echo "FIRST_RUN=true" >> $GITHUB_ENV
+            echo "first_run=true" >> $GITHUB_OUTPUT
+            echo "🆕 First run detected - no previous data found"
+          fi
 
       - name: Run monitoring cycle
         env:
           API_KEY: ${{ steps.extract-api-key.outputs.api_key }}
           VERBOSE: ${{ github.event.inputs.run_type == 'verbose' || github.event.inputs.run_type == 'debug' }}
           DEBUG: ${{ github.event.inputs.run_type == 'debug' }}
+          FIRST_RUN: ${{ steps.check-first-run.outputs.first_run }}
         run: |
           set -e
           source .github/scripts/logger.sh
+          
+          log_info "First run status: $FIRST_RUN"
+          log_info "Existing data check completed"
           
           # Enable debug mode if requested
           if [ "$DEBUG" = "true" ]; then
@@ -226,7 +296,7 @@ jobs:
           log_success "Health check passed"
           
           # Ensure directories are writable
-          mkdir -p "$LOG_DIR" "$REPORT_DIR" "data"
+          mkdir -p "$LOG_DIR" "$REPORT_DIR" "data/datastore" "data/reports"
           chmod -R 777 "$LOG_DIR" "$REPORT_DIR" "data"
           
           # Run monitoring with retry logic
@@ -245,6 +315,7 @@ jobs:
               -e GITHUB_SHA="$GITHUB_SHA" \
               -e GITHUB_REF="$GITHUB_REF" \
               -e MONITOR_RUN_TYPE="${{ github.event.inputs.run_type || 'standard' }}" \
+              -e FIRST_RUN="$FIRST_RUN" \
               -e VERBOSE="$VERBOSE" \
               metadata-monitor python run_monitor.py; then
               
@@ -282,6 +353,17 @@ jobs:
           path: data/reports/
           retention-days: 30
           if-no-files-found: warn
+
+      - name: Upload monitoring data for next run
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: monitoring-data-${{ github.run_id }}
+          path: |
+            data/datastore/
+            data/reports/
+          retention-days: 30
+          if-no-files-found: ignore
 
       - name: Upload service logs
         if: always()
@@ -323,6 +405,10 @@ jobs:
             echo "No local datastore file found" > diagnostics/datastore-info.txt
           fi
           
+          # Data directory structure
+          echo "Data directory structure:" > diagnostics/data-structure.txt
+          find data/ -type f -name "*.json" >> diagnostics/data-structure.txt 2>&1 || true
+          
           log_success "Diagnostics collected"
 
       - name: Upload diagnostics
@@ -334,19 +420,25 @@ jobs:
           retention-days: 14
           if-no-files-found: ignore
 
-      - name: Cleanup services
+      - name: Cleanup services (preserve data)
         if: always()
         run: |
           source .github/scripts/logger.sh
           
-          log_info "Cleaning up services..."
-          $DOCKER_COMPOSE_CMD -p "$DOCKER_COMPOSE_PROJECT" down --remove-orphans --volumes --timeout 30 || true
+          log_info "Cleaning up services (preserving data)..."
+          $DOCKER_COMPOSE_CMD -p "$DOCKER_COMPOSE_PROJECT" down --remove-orphans --timeout 30 || true
           
-          # Clean up temporary files
-          rm -f "$LOCAL_DATASTORE" || true
-          rm -rf diagnostics/ || true
+          # Preserve critical data files
+          log_info "Preserving datastore and reports for next run..."
+          mkdir -p preserved-data/
+          cp -r data/datastore preserved-data/ 2>/dev/null || true
+          cp -r data/reports preserved-data/ 2>/dev/null || true
           
-          log_success "Cleanup completed"
+          # Show what we're preserving
+          echo "📁 Preserved data:"
+          find preserved-data/ -type f -name "*.json" | head -10 || echo "No data to preserve"
+          
+          log_success "Cleanup completed with data preservation"
 
       - name: Create workflow summary
         if: always()
@@ -360,14 +452,24 @@ jobs:
             echo "- **Commit:** ${{ github.sha }}"
             echo "- **Timestamp:** $(date -u +"%Y-%m-%d %H:%M:%S UTC")"
             echo "- **Status:** ${{ job.status }}"
+            echo "- **First Run:** ${{ steps.check-first-run.outputs.first_run }}"
             echo ""
             echo "**Artifacts:**"
             if [ "${{ job.status }}" = "success" ]; then
               echo "- ✅ Monitoring reports"
+              echo "- ✅ Monitoring data (for next run)"
               echo "- ✅ Service logs"
             else
               echo "- ❌ Monitoring reports (may be incomplete)"
+              echo "- 📋 Monitoring data (preserved for next run)"
               echo "- 📋 Service logs"
               echo "- 🔍 Failure diagnostics"
+            fi
+            echo ""
+            echo "**Data Persistence:**"
+            if [ "${{ steps.check-first-run.outputs.first_run }}" = "true" ]; then
+              echo "- 🆕 First run - initializing datastore"
+            else
+              echo "- 🔄 Continuing from previous run data"
             fi
           } >> $GITHUB_STEP_SUMMARY

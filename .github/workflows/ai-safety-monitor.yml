@@ -17,37 +17,50 @@ on:
 
 env:
   DOCKER_COMPOSE_PROJECT: ai-safety-monitor-${{ github.run_id }}
-  # Source config early for use in env section
-  CONFIG_SOURCED: "true"
 
 jobs:
   monitor:
     runs-on: ubuntu-latest
     timeout-minutes: 60
 
-    strategy:
-      fail-fast: false
-      max-parallel: 1
-    
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0 # Fetch full history for accurate monitoring
+          fetch-depth: 0
 
-      - name: Verify prerequisites
+      - name: Verify prerequisites and scripts
         run: |
-          # Check required tools exist
+          # Check required tools
           command -v docker || (echo "❌ docker not found"; exit 1)
           command -v docker-compose || (echo "❌ docker-compose not found"; exit 1)
           command -v curl || (echo "❌ curl not found"; exit 1)
           command -v jq || (echo "❌ jq not found"; exit 1)
-          echo "✅ All prerequisites available"
+          
+          # Check required scripts exist
+          required_scripts=(
+            ".github/scripts/config.sh"
+            ".github/scripts/logger.sh"
+            ".github/scripts/wait-for-service.sh"
+            ".github/scripts/extract-api-key.sh"
+          )
+          
+          for script in "${required_scripts[@]}"; do
+            if [ ! -f "$script" ]; then
+              echo "❌ Required script not found: $script"
+              exit 1
+            fi
+            chmod +x "$script"
+          done
+          
+          echo "✅ All prerequisites and scripts available"
 
       - name: Setup environment
         run: |
           # Source config and make available to subsequent steps
+          set -a  # Automatically export all variables
           source .github/scripts/config.sh
+          set +a
           
           # Export all config variables for subsequent steps
           {
@@ -83,24 +96,8 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-docker-
 
-      - name: Cache Python dependencies
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cache/pip
-            **/__pycache__
-          key: ${{ runner.os }}-python-${{ hashFiles('**/requirements.txt', '**/pyproject.toml') }}
-
-      - name: Parallel service startup
-        run: |
-          source .github/scripts/config.sh
-          # Start services in parallel when possible
-          docker compose -p $DOCKER_COMPOSE_PROJECT up -d changedetection playwright-chrome &
-          wait
-
       - name: Build and start services
         run: |
-          source .github/scripts/config.sh
           source .github/scripts/logger.sh
           
           log_info "Building metadata-monitor image..."
@@ -113,15 +110,11 @@ jobs:
 
       - name: Wait for basic connectivity
         run: |
-          source .github/scripts/config.sh
-          source .github/scripts/logger.sh
-          
           .github/scripts/wait-for-service.sh "$CHANGEDETECTION_URL" "$MAX_WAIT_ATTEMPTS" "$WAIT_INTERVAL"
 
       - name: Extract API key from changedetection datastore
         id: extract-api-key
         run: |
-          source .github/scripts/config.sh
           source .github/scripts/logger.sh
           
           log_info "Extracting API key from changedetection..."
@@ -167,6 +160,7 @@ jobs:
           # Store in environment for next steps
           echo "api_key=$API_KEY" >> $GITHUB_OUTPUT
           echo "CHANGEDETECTION_API_KEY=$API_KEY" >> $GITHUB_ENV
+          echo "::add-mask::$API_KEY"  # Mask API key in logs
           
           log_success "API key extracted successfully"
 
@@ -174,14 +168,13 @@ jobs:
         env:
           API_KEY: ${{ steps.extract-api-key.outputs.api_key }}
         run: |
-          source .github/scripts/config.sh
           source .github/scripts/logger.sh
           
           log_info "Testing systeminfo endpoint..."
           
-          response=$(curl -v -X GET "$CHANGEDETECTION_URL/api/v1/systeminfo" \
+          response=$(curl -s -X GET "$CHANGEDETECTION_URL/api/v1/systeminfo" \
             -H "x-api-key: $API_KEY" \
-            -w "\n%{http_code}" 2>&1)
+            -w "\n%{http_code}")
           
           http_code=$(echo "$response" | tail -1)
           
@@ -189,46 +182,18 @@ jobs:
             log_success "systeminfo endpoint returned HTTP 200"
           else
             log_failure "systeminfo endpoint returned HTTP $http_code"
-            log_info "Full response:"
-            echo "$response"
+            log_info "Response body:"
+            echo "$response" | head -n -1
             exit 1
           fi
 
-      - name: Wait for API to be ready
-        env:
-          API_KEY: ${{ steps.extract-api-key.outputs.api_key }}
-        run: |
-          source .github/scripts/config.sh
-          source .github/scripts/logger.sh
-          
-          log_info "Waiting for API to be ready..."
-          
-          for i in $(seq 1 "$MAX_WAIT_ATTEMPTS"); do
-            http_code=$(curl -s -o /dev/null -w "%{http_code}" \
-              -X GET "$CHANGEDETECTION_URL/api/v1/systeminfo" \
-              -H "x-api-key: $API_KEY")
-            
-            if [ "$http_code" = "200" ]; then
-              log_success "API is ready (HTTP 200)"
-              exit 0
-            fi
-            
-            log_info "API returned HTTP $http_code, waiting... attempt $i/$MAX_WAIT_ATTEMPTS"
-            sleep "$WAIT_INTERVAL"
-          done
-          
-          log_failure "API never returned 200 status"
-          docker compose -p $DOCKER_COMPOSE_PROJECT logs changedetection --tail=20
-          exit 1
-
       - name: Prepare directories
         run: |
-          source .github/scripts/config.sh
           source .github/scripts/logger.sh
           
           log_info "Creating required directories..."
-          mkdir -p "$REPORT_DIR" "$LOG_DIR"
-          chmod -R 777 "$REPORT_DIR" "$LOG_DIR"
+          mkdir -p "$REPORT_DIR" "$LOG_DIR" "$DOCKER_LOG_DIR"
+          chmod -R 755 "$REPORT_DIR" "$LOG_DIR" "$DOCKER_LOG_DIR"
           log_success "Directories prepared"
 
       - name: Run monitoring cycle
@@ -238,8 +203,6 @@ jobs:
           DEBUG: ${{ github.event.inputs.run_type == 'debug' }}
         run: |
           set -e
-          
-          source .github/scripts/config.sh
           source .github/scripts/logger.sh
           
           # Enable debug mode if requested
@@ -296,60 +259,21 @@ jobs:
             fi
           done
 
+      - name: Save service logs
+        if: always()
+        run: |
+          mkdir -p "$DOCKER_LOG_DIR"
+          docker compose -p "$DOCKER_COMPOSE_PROJECT" logs changedetection > "$DOCKER_LOG_DIR/changedetection.log" 2>&1 || true
+          docker compose -p "$DOCKER_COMPOSE_PROJECT" logs playwright-chrome > "$DOCKER_LOG_DIR/playwright.log" 2>&1 || true
+
       - name: Upload monitoring reports
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: monitoring-reports-${{ github.run_id }}-${{ github.run_attempt }}
-          path: |
-            data/reports/
-            !data/reports/tmp/
-          compression-level: 9
+          name: monitoring-reports-${{ github.run_id }}
+          path: data/reports/
           retention-days: 30
-          if-no-files-found: error
-
-      - name: Archive old artifacts
-        if: always()
-        uses: actions/github-script@v7
-        with:
-          script: |
-            // Keep only last 10 runs to save storage
-            const { data: artifacts } = await github.rest.actions.listArtifactsForRepo({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              per_page: 100
-            });
-            
-            const oldArtifacts = artifacts
-              .filter(art => art.name.includes('monitoring-reports-') || art.name.includes('service-logs-'))
-              .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
-              .slice(10);
-            
-            for (const artifact of oldArtifacts) {
-              await github.rest.actions.deleteArtifact({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                artifact_id: artifact.id
-              });
-            }
-
-      - name: Upload logs
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: monitor-logs-${{ github.run_id }}
-          path: logs/
-          retention-days: 7
-          if-no-files-found: ignore
-
-      - name: Save service logs
-        if: always()
-        run: |
-          source .github/scripts/config.sh
-          
-          mkdir -p "$DOCKER_LOG_DIR"
-          docker compose -p "$DOCKER_COMPOSE_PROJECT" logs changedetection > "$DOCKER_LOG_DIR/changedetection.log" 2>&1 || true
-          docker compose -p "$DOCKER_COMPOSE_PROJECT" logs playwright-chrome > "$DOCKER_LOG_DIR/playwright.log" 2>&1 || true
+          if-no-files-found: warn
 
       - name: Upload service logs
         if: always()
@@ -358,11 +282,11 @@ jobs:
           name: service-logs-${{ github.run_id }}
           path: docker-logs/
           retention-days: 7
+          if-no-files-found: ignore
 
       - name: Collect diagnostics on failure
         if: failure()
         run: |
-          source .github/scripts/config.sh
           source .github/scripts/logger.sh
           
           mkdir -p diagnostics
@@ -372,17 +296,15 @@ jobs:
           # System info
           uname -a > diagnostics/system-info.txt
           df -h >> diagnostics/system-info.txt
+          free -h >> diagnostics/system-info.txt
           
           # Docker status
           docker ps -a > diagnostics/docker-containers.txt 2>&1 || true
           docker network ls > diagnostics/docker-networks.txt 2>&1 || true
           docker volume ls > diagnostics/docker-volumes.txt 2>&1 || true
           
-          # Network diagnostics
-          netstat -tulpn > diagnostics/network-status.txt 2>&1 || true
-          
-          # Full service logs
-          docker compose -p "$DOCKER_COMPOSE_PROJECT" logs > diagnostics/full-compose-logs.txt 2>&1 || true
+          # Service info
+          docker compose -p "$DOCKER_COMPOSE_PROJECT" ps > diagnostics/compose-services.txt 2>&1 || true
           
           log_success "Diagnostics collected"
 
@@ -393,41 +315,25 @@ jobs:
           name: failure-diagnostics-${{ github.run_id }}
           path: diagnostics/
           retention-days: 14
+          if-no-files-found: ignore
 
-      - name: Cleanup resources
+      - name: Cleanup services
         if: always()
         run: |
-          source .github/scripts/config.sh
           source .github/scripts/logger.sh
           
-          log_info "Performing comprehensive cleanup..."
-          
-          # Stop services
-          docker compose -p "$DOCKER_COMPOSE_PROJECT" down --remove-orphans --volumes --timeout 30
-          
-          # Clean up Docker resources
-          docker system prune -f --filter "until=24h" || true
+          log_info "Cleaning up services..."
+          docker compose -p "$DOCKER_COMPOSE_PROJECT" down --remove-orphans --volumes --timeout 30 || true
           
           # Clean up temporary files
-          rm -rf "$LOCAL_DATASTORE" "$DOCKER_LOG_DIR" diagnostics/ || true
+          rm -f "$LOCAL_DATASTORE" || true
+          rm -rf diagnostics/ || true
           
           log_success "Cleanup completed"
-
-      - name: Tear down services
-        if: always()
-        run: |
-          source .github/scripts/config.sh
-          source .github/scripts/logger.sh
-          
-          log_info "Tearing down services..."
-          docker compose -p "$DOCKER_COMPOSE_PROJECT" down --remove-orphans
-          log_success "Services torn down"
 
       - name: Create workflow summary
         if: always()
         run: |
-          source .github/scripts/config.sh
-          
           {
             echo "## AI Safety Monitor Run Summary"
             echo ""
@@ -438,14 +344,13 @@ jobs:
             echo "- **Timestamp:** $(date -u +"%Y-%m-%d %H:%M:%S UTC")"
             echo "- **Status:** ${{ job.status }}"
             echo ""
-            echo "**Configuration:**"
-            echo "- **Service URL:** $CHANGEDETECTION_URL"
-            echo "- **Max Wait Attempts:** $MAX_WAIT_ATTEMPTS"
-            echo "- **Wait Interval:** ${WAIT_INTERVAL}s"
-            echo "- **Max Monitor Attempts:** $MAX_MONITOR_ATTEMPTS"
-            echo ""
             echo "**Artifacts:**"
-            echo "- Monitoring reports"
-            echo "- Application logs"
-            echo "- Service logs"
+            if [ "${{ job.status }}" = "success" ]; then
+              echo "- ✅ Monitoring reports"
+              echo "- ✅ Service logs"
+            else
+              echo "- ❌ Monitoring reports (may be incomplete)"
+              echo "- 📋 Service logs"
+              echo "- 🔍 Failure diagnostics"
+            fi
           } >> $GITHUB_STEP_SUMMARY

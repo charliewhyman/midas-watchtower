@@ -1,5 +1,4 @@
 """Configuration management for AI Safety Monitor"""
-import os
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 from pydantic_settings import BaseSettings

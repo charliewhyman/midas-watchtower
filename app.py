@@ -3,7 +3,6 @@ import os
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
-from typing import Dict, Any
 
 from fastapi import FastAPI, Depends, HTTPException, BackgroundTasks
 import requests

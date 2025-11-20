@@ -1,6 +1,6 @@
 """Google Sheets reporting functionality"""
 import os
-from typing import Dict, Any, Optional
+from typing import Optional
 from google.oauth2.service_account import Credentials
 import gspread
 

@@ -3,7 +3,7 @@ import json
 import os
 from datetime import datetime
 from pathlib import Path
-from typing import List, Dict, Any
+from typing import List
 
 from models import DetectedChange, MonitoringCycleStats
 import logging

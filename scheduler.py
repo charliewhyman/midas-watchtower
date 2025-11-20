@@ -3,7 +3,6 @@ import schedule
 import time
 from datetime import datetime, timedelta
 from typing import List, Dict, Any, Optional, TYPE_CHECKING
-from collections import deque
 
 from config import AppConfig
 from models import UrlSchedule

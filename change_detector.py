@@ -1,10 +1,10 @@
 """Change detection functionality"""
 from datetime import datetime
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List
 import json
 from pathlib import Path
 
-from models import UrlMetadata, ChangeDetails, DetectedChange
+from models import UrlMetadata, ChangeDetails
 import logging
 
 logger = logging.getLogger(__name__)

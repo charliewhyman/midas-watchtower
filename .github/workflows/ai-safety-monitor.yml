@@ -16,7 +16,7 @@ on:
           - debug
 
 env:
-  DOCKER_COMPOSE_PROJECT: ai-safety-monitor-${{ github.run_id }}
+  DOCKER_COMPOSE_PROJECT: ai-safety-monitor-${{ github.run_number }}
 
 jobs:
   monitor:
@@ -43,11 +43,11 @@ jobs:
       - name: Download previous monitoring data
         uses: actions/download-artifact@v4
         with:
-          name: monitoring-data
+          name: monitoring-data-*
           path: data/
           pattern: monitoring-data-*
           merge-multiple: true
-        continue-on-error: true  # Allow first run to succeed
+        continue-on-error: true
 
       - name: Restore data permissions and structure
         run: |
@@ -233,26 +233,29 @@ jobs:
         run: |
           echo "🔍 Checking for existing monitoring data..."
           
-          # Check if we have a valid datastore with watches
-          if [ -f "data/datastore/datastore.json" ]; then
-            echo "📁 Found datastore.json file"
-            # Check if datastore has watches configured
-            if command -v jq >/dev/null 2>&1; then
-              watch_count=$(jq '.watches | length' data/datastore/datastore.json 2>/dev/null || echo "0")
-              echo "Watches found: $watch_count"
-              
-              if [ "$watch_count" -gt 0 ]; then
-                echo "FIRST_RUN=false" >> $GITHUB_ENV
-                echo "first_run=false" >> $GITHUB_OUTPUT
-                echo "✅ Continuing from existing datastore with $watch_count watches"
-                exit 0
-              fi
+          # Check what artifacts were actually downloaded
+          echo "📁 Downloaded artifacts in data/:"
+          find data/ -type f -name "*" 2>/dev/null | head -20 || echo "No data files found"
+          
+          # Check for changedetection database (the actual datastore file)
+          if [ -f "data/datastore/changedetection.db" ]; then
+            echo "📁 Found changedetection.db datastore file"
+            db_size=$(wc -c < "data/datastore/changedetection.db")
+            echo "Datastore size: $db_size bytes"
+            
+            if [ "$db_size" -gt 1000 ]; then  # Reasonable minimum size for a valid datastore
+              echo "FIRST_RUN=false" >> $GITHUB_ENV
+              echo "first_run=false" >> $GITHUB_OUTPUT
+              echo "✅ Continuing from existing datastore (size: $db_size bytes)"
+              exit 0
+            else
+              echo "⚠️ Datastore file exists but is too small ($db_size bytes), treating as first run"
             fi
           fi
-          
-          # Check for previous reports
-          if ls data/reports/cycle_*.json 1> /dev/null 2>&1; then
-            report_count=$(ls data/reports/cycle_*.json 2>/dev/null | wc -l)
+        
+          # Check for any previous monitoring reports
+          if find data/reports/ -name "*.json" -type f 2>/dev/null | grep -q .; then
+            report_count=$(find data/reports/ -name "*.json" -type f 2>/dev/null | wc -l)
             echo "Previous reports found: $report_count"
             echo "FIRST_RUN=false" >> $GITHUB_ENV
             echo "first_run=false" >> $GITHUB_OUTPUT
@@ -261,6 +264,10 @@ jobs:
             echo "FIRST_RUN=true" >> $GITHUB_ENV
             echo "first_run=true" >> $GITHUB_OUTPUT
             echo "🆕 First run detected - no previous data found"
+            
+            # Show what we expected to find
+            echo "Expected datastore: data/datastore/changedetection.db"
+            echo "Expected reports: data/reports/cycle_*.json"
           fi
 
       - name: Run monitoring cycle
@@ -268,7 +275,6 @@ jobs:
           API_KEY: ${{ steps.extract-api-key.outputs.api_key }}
           VERBOSE: ${{ github.event.inputs.run_type == 'verbose' || github.event.inputs.run_type == 'debug' }}
           DEBUG: ${{ github.event.inputs.run_type == 'debug' }}
-          FIRST_RUN: ${{ steps.check-first-run.outputs.first_run }}
           GOOGLE_SHEETS_TYPE: ${{ secrets.GOOGLE_SHEETS_TYPE }}
           GOOGLE_SHEETS_PROJECT_ID: ${{ secrets.GOOGLE_SHEETS_PROJECT_ID }}
           GOOGLE_SHEETS_PRIVATE_KEY_ID: ${{ secrets.GOOGLE_SHEETS_PRIVATE_KEY_ID }}
@@ -278,6 +284,9 @@ jobs:
         run: |
           set -e
           source .github/scripts/logger.sh
+
+          # Get the first_run value directly from the step output
+          FIRST_RUN="${{ steps.check-first-run.outputs.first_run }}"
           
           log_info "First run status: $FIRST_RUN"
           log_info "Existing data check completed"
@@ -355,7 +364,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: monitoring-reports-${{ github.run_id }}
+          name: monitoring-reports-${{ github.run_number }}
           path: data/reports/
           retention-days: 30
           if-no-files-found: warn
@@ -364,7 +373,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: monitoring-data-${{ github.run_id }}
+          name: monitoring-data-${{ github.run_number }}  # Use run_number instead of run_id for sequential naming
           path: |
             data/datastore/
             data/reports/
@@ -375,7 +384,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: service-logs-${{ github.run_id }}
+          name: service-logs-${{ github.run_number }}
           path: docker-logs/
           retention-days: 7
           if-no-files-found: ignore
@@ -421,7 +430,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: failure-diagnostics-${{ github.run_id }}
+          name: failure-diagnostics-${{ github.run_number }}
           path: diagnostics/
           retention-days: 14
           if-no-files-found: ignore

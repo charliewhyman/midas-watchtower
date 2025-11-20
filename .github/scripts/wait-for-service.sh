@@ -1,22 +1,37 @@
-# .github/scripts/wait-for-service.sh
 #!/bin/bash
-set -euo pipefail
 
-SERVICE_URL="${1:?Service URL required}"
+# Wait for a service to become available
+set -e
+
+SERVICE_URL="$1"
 MAX_ATTEMPTS="${2:-30}"
 INTERVAL="${3:-5}"
-TIMEOUT_TOTAL=$((MAX_ATTEMPTS * INTERVAL))
 
-echo "Waiting for $SERVICE_URL (timeout: ${TIMEOUT_TOTAL}s)..."
+source .github/scripts/logger.sh
+
+log_info() {
+    echo "ℹ️  INFO: $1"
+}
+
+log_success() {
+    echo "✅ SUCCESS: $1"
+}
+
+log_failure() {
+    echo "❌ FAILURE: $1"
+}
+
+log_info "Waiting for $SERVICE_URL (max attempts: $MAX_ATTEMPTS, interval: ${INTERVAL}s)"
 
 for i in $(seq 1 "$MAX_ATTEMPTS"); do
-  if curl -sf "$SERVICE_URL" > /dev/null 2>&1; then
-    echo "✅ Service is ready"
-    return 0
-  fi
-  echo "Attempt $i/$MAX_ATTEMPTS - retrying in ${INTERVAL}s..."
-  sleep "$INTERVAL"
+    if curl -s -f "$SERVICE_URL" > /dev/null 2>&1; then
+        log_success "Service is available after $((i * INTERVAL)) seconds"
+        exit 0
+    fi
+    
+    log_info "Attempt $i/$MAX_ATTEMPTS - retrying in ${INTERVAL}s..."
+    sleep "$INTERVAL"
 done
 
-echo "❌ Service failed to become ready after ${TIMEOUT_TOTAL}s"
-return 1
+log_failure "Service at $SERVICE_URL never became available after $((MAX_ATTEMPTS * INTERVAL)) seconds"
+exit 1

@@ -58,7 +58,12 @@ jobs:
       - name: Extract API key from changedetection datastore
         run: |
           echo "Extracting API key from changedetection..."
-          CID=$(docker ps --filter "status=running" --format '{{.Names}}' | grep changedetection)
+          CID=$(docker ps --filter "status=running" --filter "name=.*changedetection" \
+            --format '{{.Names}}' | head -1)
+          if [ -z "$CID" ]; then
+            echo "❌ ERROR: changedetection container not found"
+            exit 1
+          fi
           
           # Wait for datastore file
           for i in {1..20}; do

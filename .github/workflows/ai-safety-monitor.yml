@@ -29,15 +29,39 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Debug workspace structure
+        run: |
+          echo "📁 Current directory structure:"
+          ls -la
+          echo ""
+          echo "📁 .github directory structure:"
+          ls -la .github/ || echo "No .github directory"
+          echo ""
+          echo "📁 Scripts directory structure:"
+          ls -la .github/scripts/ || echo "No scripts directory"
+
       - name: Verify prerequisites and scripts
         run: |
-          # Check required tools
-          command -v docker || (echo "❌ docker not found"; exit 1)
-          command -v docker-compose || (echo "❌ docker-compose not found"; exit 1)
-          command -v curl || (echo "❌ curl not found"; exit 1)
-          command -v jq || (echo "❌ jq not found"; exit 1)
+          echo "🔧 Checking prerequisites..."
+          command -v docker && echo "✅ docker found: $(docker --version)" || (echo "❌ docker not found"; exit 1)
           
-          # Check required scripts exist
+          # Check for docker compose (plugin) or docker-compose (standalone)
+          if docker compose version >/dev/null 2>&1; then
+            echo "✅ docker compose (plugin) found: $(docker compose version | head -1)"
+            echo "DOCKER_COMPOSE_CMD=docker compose" >> $GITHUB_ENV
+          elif command -v docker-compose >/dev/null 2>&1; then
+            echo "✅ docker-compose (standalone) found: $(docker-compose --version)"
+            echo "DOCKER_COMPOSE_CMD=docker-compose" >> $GITHUB_ENV
+          else
+            echo "❌ Neither docker compose nor docker-compose found"
+            exit 1
+          fi
+          
+          command -v curl && echo "✅ curl found: $(curl --version | head -1)" || (echo "❌ curl not found"; exit 1)
+          command -v jq && echo "✅ jq found: $(jq --version)" || (echo "❌ jq not found"; exit 1)
+          
+          echo ""
+          echo "📜 Checking required scripts..."
           required_scripts=(
             ".github/scripts/config.sh"
             ".github/scripts/logger.sh"
@@ -51,6 +75,7 @@ jobs:
               exit 1
             fi
             chmod +x "$script"
+            echo "✅ $script is executable"
           done
           
           echo "✅ All prerequisites and scripts available"
@@ -82,6 +107,7 @@ jobs:
           
           echo "✅ Environment configured"
           echo "Service URL: $CHANGEDETECTION_URL"
+          echo "Docker Compose Command: $DOCKER_COMPOSE_CMD"
 
       - name: Setup Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -101,10 +127,10 @@ jobs:
           source .github/scripts/logger.sh
           
           log_info "Building metadata-monitor image..."
-          docker compose build metadata-monitor
+          $DOCKER_COMPOSE_CMD build metadata-monitor
           
           log_info "Starting changedetection and playwright services..."
-          docker compose -p $DOCKER_COMPOSE_PROJECT up -d changedetection playwright-chrome
+          $DOCKER_COMPOSE_CMD -p $DOCKER_COMPOSE_PROJECT up -d changedetection playwright-chrome
           
           log_success "Services started successfully"
 
@@ -125,6 +151,7 @@ jobs:
           
           if [ -z "$CID" ]; then
             log_failure "changedetection container not found"
+            docker ps -a
             exit 1
           fi
           
@@ -145,6 +172,7 @@ jobs:
           log_info "Copying datastore to local filesystem..."
           if ! docker cp "$CID:$DATASTORE_FILE" "$LOCAL_DATASTORE"; then
             log_failure "Failed to extract datastore"
+            docker exec "$CID" ls -la /datastore/ || true
             exit 1
           fi
           
@@ -156,6 +184,13 @@ jobs:
           # Extract API key using proper script
           log_info "Extracting API key..."
           API_KEY=$(.github/scripts/extract-api-key.sh "$LOCAL_DATASTORE")
+          
+          if [ -z "$API_KEY" ]; then
+            log_failure "Failed to extract API key"
+            echo "Datastore content (first 500 chars):"
+            head -c 500 "$LOCAL_DATASTORE"
+            exit 1
+          fi
           
           # Store in environment for next steps
           echo "api_key=$API_KEY" >> $GITHUB_OUTPUT
@@ -228,7 +263,7 @@ jobs:
           for attempt in $(seq 1 "$MAX_MONITOR_ATTEMPTS"); do
             log_info "Monitoring Attempt $attempt/$MAX_MONITOR_ATTEMPTS"
             
-            if docker compose -p "$DOCKER_COMPOSE_PROJECT" run --rm \
+            if $DOCKER_COMPOSE_CMD -p "$DOCKER_COMPOSE_PROJECT" run --rm \
               -e CHANGEDETECTION_API_KEY="$API_KEY" \
               -e CHANGEDETECTION_URL="$CHANGEDETECTION_CONTAINER_URL" \
               -e GITHUB_ACTIONS=true \
@@ -250,7 +285,7 @@ jobs:
                 sleep "$RESTART_DELAY"
                 
                 log_info "Restarting changedetection service..."
-                docker compose -p "$DOCKER_COMPOSE_PROJECT" restart changedetection
+                $DOCKER_COMPOSE_CMD -p "$DOCKER_COMPOSE_PROJECT" restart changedetection
                 sleep 10
               else
                 log_failure "All monitoring attempts failed"
@@ -263,8 +298,8 @@ jobs:
         if: always()
         run: |
           mkdir -p "$DOCKER_LOG_DIR"
-          docker compose -p "$DOCKER_COMPOSE_PROJECT" logs changedetection > "$DOCKER_LOG_DIR/changedetection.log" 2>&1 || true
-          docker compose -p "$DOCKER_COMPOSE_PROJECT" logs playwright-chrome > "$DOCKER_LOG_DIR/playwright.log" 2>&1 || true
+          $DOCKER_COMPOSE_CMD -p "$DOCKER_COMPOSE_PROJECT" logs changedetection > "$DOCKER_LOG_DIR/changedetection.log" 2>&1 || true
+          $DOCKER_COMPOSE_CMD -p "$DOCKER_COMPOSE_PROJECT" logs playwright-chrome > "$DOCKER_LOG_DIR/playwright.log" 2>&1 || true
 
       - name: Upload monitoring reports
         if: always()
@@ -304,7 +339,16 @@ jobs:
           docker volume ls > diagnostics/docker-volumes.txt 2>&1 || true
           
           # Service info
-          docker compose -p "$DOCKER_COMPOSE_PROJECT" ps > diagnostics/compose-services.txt 2>&1 || true
+          $DOCKER_COMPOSE_CMD -p "$DOCKER_COMPOSE_PROJECT" ps > diagnostics/compose-services.txt 2>&1 || true
+          $DOCKER_COMPOSE_CMD -p "$DOCKER_COMPOSE_PROJECT" logs --tail=50 > diagnostics/compose-logs.txt 2>&1 || true
+          
+          # Check if datastore file exists and its content
+          if [ -f "$LOCAL_DATASTORE" ]; then
+            echo "Datastore file exists, size: $(wc -c < "$LOCAL_DATASTORE") bytes" > diagnostics/datastore-info.txt
+            head -c 1000 "$LOCAL_DATASTORE" > diagnostics/datastore-preview.txt 2>&1 || true
+          else
+            echo "No local datastore file found" > diagnostics/datastore-info.txt
+          fi
           
           log_success "Diagnostics collected"
 
@@ -323,7 +367,7 @@ jobs:
           source .github/scripts/logger.sh
           
           log_info "Cleaning up services..."
-          docker compose -p "$DOCKER_COMPOSE_PROJECT" down --remove-orphans --volumes --timeout 30 || true
+          $DOCKER_COMPOSE_CMD -p "$DOCKER_COMPOSE_PROJECT" down --remove-orphans --volumes --timeout 30 || true
           
           # Clean up temporary files
           rm -f "$LOCAL_DATASTORE" || true

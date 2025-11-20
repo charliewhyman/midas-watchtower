@@ -18,6 +18,7 @@ class ChangedetectionService:
     def __init__(self, config: AppConfig):
         self.config = config
         self.base_url = config.settings.changedetection_url.rstrip('/')
+        self.api_key = config.settings.changedetection_api_key
         logger.info(f"🔧 Changedetection service initialized with URL: {self.base_url}")
         self.headers = self._get_headers()
     

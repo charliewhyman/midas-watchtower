@@ -24,10 +24,17 @@ jobs:
   monitor:
     runs-on: ubuntu-latest
     timeout-minutes: 60
+
+    strategy:
+      fail-fast: false
+      matrix:
+        attempt: [1, 2, 3]
     
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Fetch full history for accurate monitoring
 
       - name: Verify prerequisites
         run: |
@@ -70,10 +77,27 @@ jobs:
       - name: Cache Docker layers
         uses: actions/cache@v4
         with:
-          path: /tmp/.buildx-cache
-          key: ${{ runner.os }}-docker-${{ github.sha }}
+          path: |
+            ~/.cache/docker
+            /tmp/.buildx-cache
+          key: ${{ runner.os }}-docker-${{ hashFiles('docker-compose.yml', 'Dockerfile*', 'requirements.txt') }}
           restore-keys: |
             ${{ runner.os }}-docker-
+
+      - name: Cache Python dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/pip
+            **/__pycache__
+          key: ${{ runner.os }}-python-${{ hashFiles('**/requirements.txt', '**/pyproject.toml') }}
+
+      - name: Parallel service startup
+        run: |
+          source .github/scripts/config.sh
+          # Start services in parallel when possible
+          docker compose -p $DOCKER_COMPOSE_PROJECT up -d changedetection playwright-chrome &
+          wait
 
       - name: Build and start services
         run: |

@@ -27,7 +27,10 @@ class GoogleSheetsReporter:
                 "https://www.googleapis.com/auth/drive"
             ]
             
-            if self.config.settings.google_sheets_use_env:
+            # Check if running in GitHub Actions first
+            if self._is_github_actions():
+                creds = self._get_credentials_from_github_actions()
+            elif self.config.settings.google_sheets_use_env:
                 creds = self._get_credentials_from_env()
             else:
                 creds = self._get_credentials_from_file()
@@ -43,6 +46,70 @@ class GoogleSheetsReporter:
         except Exception as e:
             logger.error(f"Unexpected error setting up Google Sheets: {e}")
             self.client = None
+    
+    def _is_github_actions(self) -> bool:
+        """Check if running in GitHub Actions environment"""
+        return os.getenv('GITHUB_ACTIONS') == 'true'
+    
+    def _get_credentials_from_github_actions(self) -> Optional[Credentials]:
+        """Create credentials from GitHub Actions secrets"""
+        try:
+            logger.info("Setting up Google Sheets credentials from GitHub Actions secrets")
+            
+            # Required environment variables from GitHub Secrets
+            required_secrets = {
+                'GOOGLE_SHEETS_TYPE': 'type',
+                'GOOGLE_SHEETS_PROJECT_ID': 'project_id',
+                'GOOGLE_SHEETS_PRIVATE_KEY_ID': 'private_key_id',
+                'GOOGLE_SHEETS_PRIVATE_KEY': 'private_key',
+                'GOOGLE_SHEETS_CLIENT_EMAIL': 'client_email',
+                'GOOGLE_SHEETS_CLIENT_ID': 'client_id',
+            }
+            
+            # Check for missing secrets
+            missing_secrets = []
+            service_account_info = {}
+            
+            for env_var, key in required_secrets.items():
+                value = os.getenv(env_var)
+                if not value:
+                    missing_secrets.append(env_var)
+                else:
+                    service_account_info[key] = value
+            
+            if missing_secrets:
+                logger.error(f"Missing required GitHub Actions secrets: {missing_secrets}")
+                return None
+            
+            # Handle private key formatting (replace escaped newlines)
+            if 'private_key' in service_account_info:
+                service_account_info['private_key'] = service_account_info['private_key'].replace('\\n', '\n')
+            
+            # Add optional fields with defaults if not provided
+            optional_fields = {
+                'auth_uri': 'https://accounts.google.com/o/oauth2/auth',
+                'token_uri': 'https://oauth2.googleapis.com/token',
+                'auth_provider_x509_cert_url': 'https://www.googleapis.com/oauth2/v1/certs',
+                'client_x509_cert_url': f"https://www.googleapis.com/robot/v1/metadata/x509/{service_account_info['client_email'].replace('@', '%40')}"
+            }
+            
+            for key, default_value in optional_fields.items():
+                env_var = f"GOOGLE_SHEETS_{key.upper()}"
+                value = os.getenv(env_var, default_value)
+                service_account_info[key] = value
+            
+            scopes = [
+                "https://www.googleapis.com/auth/spreadsheets",
+                "https://www.googleapis.com/auth/drive"
+            ]
+            
+            creds = Credentials.from_service_account_info(service_account_info, scopes=scopes)
+            logger.info("Successfully created credentials from GitHub Actions secrets")
+            return creds
+            
+        except Exception as e:
+            logger.error(f"Error creating credentials from GitHub Actions: {e}")
+            return None
     
     def _get_credentials_from_env(self) -> Optional[Credentials]:
         """Create credentials from environment variables"""

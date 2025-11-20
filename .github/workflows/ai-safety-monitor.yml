@@ -138,66 +138,14 @@ jobs:
         run: |
           .github/scripts/wait-for-service.sh "$CHANGEDETECTION_URL" "$MAX_WAIT_ATTEMPTS" "$WAIT_INTERVAL"
 
+      
       - name: Extract API key from changedetection datastore
         id: extract-api-key
         run: |
-          source .github/scripts/logger.sh
-          
-          log_info "Extracting API key from changedetection..."
-          
-          # Get container ID
-          CID=$(docker ps --filter "status=running" --filter "name=.*changedetection" \
-            --format '{{.Names}}' | head -1)
-          
-          if [ -z "$CID" ]; then
-            log_failure "changedetection container not found"
-            docker ps -a
-            exit 1
-          fi
-          
-          log_info "Container ID: $CID"
-          
-          # Wait for datastore file
-          log_info "Waiting for datastore file: $DATASTORE_FILE"
-          for i in $(seq 1 20); do
-            if docker exec "$CID" sh -c "[ -f $DATASTORE_FILE ]" 2>/dev/null; then
-              log_success "Datastore file found"
-              break
-            fi
-            log_info "Waiting for datastore... attempt $i/20"
-            sleep 3
-          done
-          
-          # Copy datastore
-          log_info "Copying datastore to local filesystem..."
-          if ! docker cp "$CID:$DATASTORE_FILE" "$LOCAL_DATASTORE"; then
-            log_failure "Failed to extract datastore"
-            docker exec "$CID" ls -la /datastore/ || true
-            exit 1
-          fi
-          
-          if [ ! -f "$LOCAL_DATASTORE" ]; then
-            log_failure "Datastore file not found locally"
-            exit 1
-          fi
-          
-          # Extract API key using proper script
-          log_info "Extracting API key..."
-          API_KEY=$(.github/scripts/extract-api-key.sh "$LOCAL_DATASTORE")
-          
-          if [ -z "$API_KEY" ]; then
-            log_failure "Failed to extract API key"
-            echo "Datastore content (first 500 chars):"
-            head -c 500 "$LOCAL_DATASTORE"
-            exit 1
-          fi
-          
-          # Store in environment for next steps
-          echo "api_key=$API_KEY" >> $GITHUB_OUTPUT
+          API_KEY=$(.github/scripts/extract-api-key.sh)
           echo "CHANGEDETECTION_API_KEY=$API_KEY" >> $GITHUB_ENV
-          echo "::add-mask::$API_KEY"  # Mask API key in logs
-          
-          log_success "API key extracted successfully"
+          echo "api_key=$API_KEY" >> $GITHUB_OUTPUT
+          echo "::add-mask::$API_KEY"
 
       - name: Test systeminfo endpoint
         env:

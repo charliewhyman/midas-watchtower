@@ -27,12 +27,14 @@ class GoogleSheetsReporter:
                 "https://www.googleapis.com/auth/drive"
             ]
             
-            # Check if running in GitHub Actions first
-            if self._is_github_actions():
+            # Use the config to determine credential source
+            cred_source = self.config.settings.get_google_sheets_credential_source()
+            
+            if cred_source == "github_actions":
                 creds = self._get_credentials_from_github_actions()
-            elif self.config.settings.google_sheets_use_env:
+            elif cred_source == "environment":
                 creds = self._get_credentials_from_env()
-            else:
+            else:  # file
                 creds = self._get_credentials_from_file()
             
             if creds:

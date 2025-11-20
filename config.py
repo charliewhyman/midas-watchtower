@@ -1,4 +1,5 @@
 """Configuration management for AI Safety Monitor"""
+import os
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 from pydantic_settings import BaseSettings
@@ -40,6 +41,38 @@ class MonitorSettings(BaseSettings):
     history_file: str = "data/url_history.json"
     config_file: str = "config.yaml"
     
+    @property
+    def is_github_actions(self) -> bool:
+        """Check if running in GitHub Actions environment"""
+        return os.getenv('GITHUB_ACTIONS') == 'true'
+    
+    @property
+    def should_use_github_actions_creds(self) -> bool:
+        """Determine if we should use GitHub Actions credentials"""
+        if not self.is_github_actions:
+            return False
+        
+        # Check if required GitHub Actions secrets are available
+        required_secrets = [
+            'GOOGLE_SHEETS_TYPE',
+            'GOOGLE_SHEETS_PROJECT_ID',
+            'GOOGLE_SHEETS_PRIVATE_KEY_ID', 
+            'GOOGLE_SHEETS_PRIVATE_KEY',
+            'GOOGLE_SHEETS_CLIENT_EMAIL',
+            'GOOGLE_SHEETS_CLIENT_ID',
+        ]
+        
+        return all(os.getenv(secret) for secret in required_secrets)
+    
+    def get_google_sheets_credential_source(self) -> str:
+        """Determine which credential source to use"""
+        if self.should_use_github_actions_creds:
+            return "github_actions"
+        elif self.google_sheets_use_env:
+            return "environment"
+        else:
+            return "file"
+
     class Config:
         env_file = ".env"
         case_sensitive = False

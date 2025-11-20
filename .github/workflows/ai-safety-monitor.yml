@@ -43,11 +43,26 @@ jobs:
       - name: Download previous monitoring data
         uses: actions/download-artifact@v4
         with:
-          name: monitoring-data-*
+          name: monitoring-data
           path: data/
-          pattern: monitoring-data-*
-          merge-multiple: true
         continue-on-error: true
+
+      - name: Verify downloaded artifacts
+        run: |
+          echo "📦 Verifying downloaded artifacts..."
+          echo "Artifacts downloaded to data/:"
+          find data/ -type f -name "*" 2>/dev/null | while read file; do
+            size=$(wc -c < "$file" 2>/dev/null || echo "0")
+            echo "  - $file ($size bytes)"
+          done || echo "No artifacts found"
+          
+          echo "Checking for changedetection.db:"
+          if [ -f "data/datastore/changedetection.db" ]; then
+            db_size=$(wc -c < "data/datastore/changedetection.db")
+            echo "✅ changedetection.db found: $db_size bytes"
+          else
+            echo "❌ changedetection.db not found"
+          fi
 
       - name: Restore data permissions and structure
         run: |
@@ -243,32 +258,45 @@ jobs:
             db_size=$(wc -c < "data/datastore/changedetection.db")
             echo "Datastore size: $db_size bytes"
             
-            if [ "$db_size" -gt 1000 ]; then  # Reasonable minimum size for a valid datastore
+            # Check if it's a valid SQLite database
+            if command -v sqlite3 >/dev/null 2>&1; then
+              if sqlite3 "data/datastore/changedetection.db" "SELECT name FROM sqlite_master WHERE type='table';" 2>/dev/null | grep -q watches; then
+                echo "✅ Valid changedetection database with watches table"
+                echo "FIRST_RUN=false" >> $GITHUB_ENV
+                echo "first_run=false" >> $GITHUB_OUTPUT
+                echo "✅ Continuing from existing datastore"
+                exit 0
+              else
+                echo "⚠️ File exists but not a valid changedetection database"
+              fi
+            elif [ "$db_size" -gt 10000 ]; then  # More reasonable minimum size
+              echo "✅ Large datastore file ($db_size bytes), assuming valid"
               echo "FIRST_RUN=false" >> $GITHUB_ENV
               echo "first_run=false" >> $GITHUB_OUTPUT
-              echo "✅ Continuing from existing datastore (size: $db_size bytes)"
+              echo "✅ Continuing from existing datastore"
               exit 0
             else
-              echo "⚠️ Datastore file exists but is too small ($db_size bytes), treating as first run"
+              echo "⚠️ Datastore file exists but is too small ($db_size bytes)"
             fi
           fi
-        
+          
           # Check for any previous monitoring reports
-          if find data/reports/ -name "*.json" -type f 2>/dev/null | grep -q .; then
-            report_count=$(find data/reports/ -name "*.json" -type f 2>/dev/null | wc -l)
-            echo "Previous reports found: $report_count"
+          if find data/reports/ -name "cycle_*.json" -type f 2>/dev/null | grep -q .; then
+            report_count=$(find data/reports/ -name "cycle_*.json" -type f 2>/dev/null | wc -l)
+            echo "Previous cycle reports found: $report_count"
             echo "FIRST_RUN=false" >> $GITHUB_ENV
             echo "first_run=false" >> $GITHUB_OUTPUT
-            echo "✅ Continuing from previous run with $report_count reports"
+            echo "✅ Continuing from previous run with $report_count cycle reports"
           else
             echo "FIRST_RUN=true" >> $GITHUB_ENV
             echo "first_run=true" >> $GITHUB_OUTPUT
             echo "🆕 First run detected - no previous data found"
-            
-            # Show what we expected to find
-            echo "Expected datastore: data/datastore/changedetection.db"
-            echo "Expected reports: data/reports/cycle_*.json"
           fi
+
+      - name: Verify first run flag
+        run: |
+          echo "First run flag from env: $FIRST_RUN"
+          echo "First run flag from step output: ${{ steps.check-first-run.outputs.first_run }}"
 
       - name: Run monitoring cycle
         env:
@@ -373,7 +401,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: monitoring-data-${{ github.run_number }}  # Use run_number instead of run_id for sequential naming
+          name: monitoring-data
           path: |
             data/datastore/
             data/reports/

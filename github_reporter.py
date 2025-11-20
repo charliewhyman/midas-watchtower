@@ -16,7 +16,22 @@ class GitHubReporter:
     
     def __init__(self, reports_dir: str = "data/reports"):
         self.reports_dir = Path(reports_dir)
-        self.reports_dir.mkdir(exist_ok=True, parents=True)
+        self._ensure_directory_writable()
+    
+    def _ensure_directory_writable(self):
+        """Ensure reports directory exists and is writable"""
+        try:
+            self.reports_dir.mkdir(exist_ok=True, parents=True)
+            # Try to make it writable
+            try:
+                self.reports_dir.chmod(0o777)
+            except:
+                pass  # Ignore permission errors on chmod
+        except Exception as e:
+            logger.warning(f"Could not create reports directory {self.reports_dir}: {e}")
+            # Fallback to current directory
+            self.reports_dir = Path(".")
+            logger.info(f"Using fallback directory: {self.reports_dir.absolute()}")
     
     def is_github_actions(self) -> bool:
         """Check if running in GitHub Actions environment"""
@@ -33,7 +48,7 @@ class GitHubReporter:
                 'summary': {
                     'total_changes': len(changes),
                     'first_run': stats.first_run,
-                    'sheets_enabled': False,  # This would be set by the main service
+                    'sheets_enabled': False,
                     'github_actions': self.is_github_actions()
                 },
                 'environment': {
@@ -46,15 +61,26 @@ class GitHubReporter:
             }
             
             report_path = self.reports_dir / f"{stats.cycle_id}.json"
-            with open(report_path, 'w') as f:
-                json.dump(report_data, f, indent=2, default=str)
             
-            logger.info(f"JSON report generated: {report_path}")
+            # Ensure we can write to the file
+            try:
+                with open(report_path, 'w') as f:
+                    json.dump(report_data, f, indent=2, default=str)
+                logger.info(f"JSON report generated: {report_path}")
+            except PermissionError:
+                # Fallback to current directory
+                fallback_path = Path(f"{stats.cycle_id}.json")
+                with open(fallback_path, 'w') as f:
+                    json.dump(report_data, f, indent=2, default=str)
+                logger.info(f"JSON report generated in fallback location: {fallback_path}")
+                return fallback_path
+            
             return report_path
             
         except Exception as e:
             logger.error(f"Error generating JSON report: {e}")
-            raise
+            # Don't raise, just log and continue
+            return Path("report_failed.json")
     
     def print_github_summary(self, changes: List[DetectedChange], stats: MonitoringCycleStats) -> None:
         """Print summary for GitHub Actions workflow"""

@@ -175,8 +175,8 @@ jobs:
           source .github/scripts/logger.sh
           
           log_info "Creating required directories..."
-          mkdir -p "$REPORT_DIR" "$LOG_DIR" "$DOCKER_LOG_DIR"
-          chmod -R 755 "$REPORT_DIR" "$LOG_DIR" "$DOCKER_LOG_DIR"
+          mkdir -p "$REPORT_DIR" "$LOG_DIR" "$DOCKER_LOG_DIR" "data"
+          chmod -R 777 "$REPORT_DIR" "$LOG_DIR" "$DOCKER_LOG_DIR" "data"
           log_success "Directories prepared"
 
       - name: Run monitoring cycle
@@ -207,9 +207,9 @@ jobs:
           
           log_success "Health check passed"
           
-          # Ensure logs directory is writable
-          mkdir -p "$LOG_DIR"
-          chmod 777 "$LOG_DIR"
+          # Ensure directories are writable
+          mkdir -p "$LOG_DIR" "$REPORT_DIR" "data"
+          chmod -R 777 "$LOG_DIR" "$REPORT_DIR" "data"
           
           # Run monitoring with retry logic
           for attempt in $(seq 1 "$MAX_MONITOR_ATTEMPTS"); do
@@ -217,6 +217,8 @@ jobs:
             
             if $DOCKER_COMPOSE_CMD -p "$DOCKER_COMPOSE_PROJECT" run --rm \
               -v "$(pwd)/$LOG_DIR:/app/logs" \
+              -v "$(pwd)/$REPORT_DIR:/app/data/reports" \
+              -v "$(pwd)/data:/app/data" \
               -e CHANGEDETECTION_API_KEY="$API_KEY" \
               -e CHANGEDETECTION_URL="$CHANGEDETECTION_CONTAINER_URL" \
               -e GITHUB_ACTIONS=true \

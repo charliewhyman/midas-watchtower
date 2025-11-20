@@ -40,52 +40,38 @@ jobs:
           echo "📁 Scripts directory structure:"
           ls -la .github/scripts/ || echo "No scripts directory"
 
-      - name: List available artifacts
-        run: |
-          echo "Available artifacts in this repository:"
-          # This will list artifacts from previous runs
-          curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-            "https://api.github.com/repos/${{ github.repository }}/actions/artifacts" | \
-            jq -r '.artifacts[] | "\(.name) - \(.created_at)"' | head -10 || \
-            echo "Could not fetch artifact list"
-            
-      - name: Download previous monitoring data
-        id: download-data
-        uses: actions/download-artifact@v4
+      - name: Cache monitoring data
+        uses: actions/cache@v4
+        id: data-cache
         with:
-          name: monitoring-data-*
-          path: data/
-          pattern: monitoring-data-*
-          merge-multiple: true
-        continue-on-error: true
+          path: |
+            data/datastore/
+            data/reports/
+          key: monitoring-data-${{ github.sha }}
+          restore-keys: |
+            monitoring-data-
 
-      - name: Debug download result
+      - name: Check cache result and set first run flag
+        id: check-first-run
         run: |
-          echo "Download step result:"
-          echo "Exit code: ${{ steps.download-data.outcome }}"
-          echo "Artifact files downloaded:"
-          find data/ -type f 2>/dev/null | while read file; do
-            echo "  - $file ($(wc -c < "$file") bytes)"
-          done || echo "No files found"
-          echo "Current directory: $(pwd)"
-          echo "Data directory contents:"
-          ls -la data/ 2>/dev/null || echo "No data directory"
-
-      - name: Verify downloaded artifacts
-        run: |
-          echo "📦 Verifying downloaded artifacts..."
-          echo "Artifacts downloaded to data/:"
-          find data/ -type f -name "*" 2>/dev/null | while read file; do
-            size=$(wc -c < "$file" 2>/dev/null || echo "0")
-            echo "  - $file ($size bytes)"
-          done || echo "No artifacts found"
+          echo "🔍 Cache result: ${{ steps.data-cache.outputs.cache-hit }}"
           
-          echo "Checking for changedetection.db:"
-          if [ -f "data/datastore/changedetection.db" ]; then
-            db_size=$(wc -c < "data/datastore/changedetection.db")
-            echo "✅ changedetection.db found: $db_size bytes"
+          if [[ "${{ steps.data-cache.outputs.cache-hit }}" == 'true' ]]; then
+            echo "✅ Cache hit - continuing from previous data"
+            echo "FIRST_RUN=false" >> $GITHUB_ENV
+            echo "first_run=false" >> $GITHUB_OUTPUT
+            
+            # Verify the cached data exists
+            echo "📁 Cached data contents:"
+            find data/ -type f -name "*" 2>/dev/null | head -10 || echo "No cached files found"
           else
-            echo "❌ changedetection.db not found"
+            echo "🆕 Cache miss - first run detected"
+            echo "FIRST_RUN=true" >> $GITHUB_ENV
+            echo "first_run=true" >> $GITHUB_OUTPUT
+            
+            # Initialize data directories
+            mkdir -p data/datastore data/reports
+            echo "📁 Initialized empty data directories"
           fi
 
       - name: Restore data permissions and structure
@@ -204,6 +190,7 @@ jobs:
           echo "🔍 Cache Status:"
           echo "Python cache hit: ${{ steps.pip-cache.outputs.cache-hit }}"
           echo "Docker cache hit: ${{ steps.docker-cache.outputs.cache-hit }}"
+          echo "Data cache hit: ${{ steps.data-cache.outputs.cache-hit }}"
           
           if [[ "${{ steps.docker-cache.outputs.cache-hit }}" != 'true' ]]; then
             echo "Docker cache miss - this is normal for first run or when files change"
@@ -267,60 +254,16 @@ jobs:
           chmod -R 777 "$REPORT_DIR" "$LOG_DIR" "$DOCKER_LOG_DIR" "data"
           log_success "Directories prepared"
 
-      - name: Check for existing data and set first run flag
-        id: check-first-run
+      - name: Initialize on first run
+        if: steps.check-first-run.outputs.first_run == 'true'
         run: |
-          echo "🔍 Checking for existing monitoring data..."
+          source .github/scripts/logger.sh
+          log_info "First run detected - setting up initial configuration"
           
-          # Check what artifacts were actually downloaded
-          echo "📁 Downloaded artifacts in data/:"
-          find data/ -type f -name "*" 2>/dev/null | head -20 || echo "No data files found"
+          # Ensure directories exist
+          mkdir -p data/datastore data/reports
           
-          # Check for changedetection database (the actual datastore file)
-          if [ -f "data/datastore/changedetection.db" ]; then
-            echo "📁 Found changedetection.db datastore file"
-            db_size=$(wc -c < "data/datastore/changedetection.db")
-            echo "Datastore size: $db_size bytes"
-            
-            # Check if it's a valid SQLite database
-            if command -v sqlite3 >/dev/null 2>&1; then
-              if sqlite3 "data/datastore/changedetection.db" "SELECT name FROM sqlite_master WHERE type='table';" 2>/dev/null | grep -q watches; then
-                echo "✅ Valid changedetection database with watches table"
-                echo "FIRST_RUN=false" >> $GITHUB_ENV
-                echo "first_run=false" >> $GITHUB_OUTPUT
-                echo "✅ Continuing from existing datastore"
-                exit 0
-              else
-                echo "⚠️ File exists but not a valid changedetection database"
-              fi
-            elif [ "$db_size" -gt 10000 ]; then  # More reasonable minimum size
-              echo "✅ Large datastore file ($db_size bytes), assuming valid"
-              echo "FIRST_RUN=false" >> $GITHUB_ENV
-              echo "first_run=false" >> $GITHUB_OUTPUT
-              echo "✅ Continuing from existing datastore"
-              exit 0
-            else
-              echo "⚠️ Datastore file exists but is too small ($db_size bytes)"
-            fi
-          fi
-          
-          # Check for any previous monitoring reports
-          if find data/reports/ -name "cycle_*.json" -type f 2>/dev/null | grep -q .; then
-            report_count=$(find data/reports/ -name "cycle_*.json" -type f 2>/dev/null | wc -l)
-            echo "Previous cycle reports found: $report_count"
-            echo "FIRST_RUN=false" >> $GITHUB_ENV
-            echo "first_run=false" >> $GITHUB_OUTPUT
-            echo "✅ Continuing from previous run with $report_count cycle reports"
-          else
-            echo "FIRST_RUN=true" >> $GITHUB_ENV
-            echo "first_run=true" >> $GITHUB_OUTPUT
-            echo "🆕 First run detected - no previous data found"
-          fi
-
-      - name: Verify first run flag
-        run: |
-          echo "First run flag from env: $FIRST_RUN"
-          echo "First run flag from step output: ${{ steps.check-first-run.outputs.first_run }}"
+          log_success "First run initialization completed"
 
       - name: Run monitoring cycle
         env:
@@ -341,7 +284,7 @@ jobs:
           FIRST_RUN="${{ steps.check-first-run.outputs.first_run }}"
           
           log_info "First run status: $FIRST_RUN"
-          log_info "Existing data check completed"
+          log_info "Data cache hit: ${{ steps.data-cache.outputs.cache-hit }}"
           
           # Enable debug mode if requested
           if [ "$DEBUG" = "true" ]; then
@@ -405,6 +348,21 @@ jobs:
             fi
           done
 
+      - name: Verify data for caching
+        run: |
+          echo "📊 Data to be cached for next run:"
+          echo "Datastore contents:"
+          ls -la data/datastore/ 2>/dev/null || echo "No datastore files"
+          echo "Reports contents:"
+          ls -la data/reports/ 2>/dev/null || echo "No report files"
+          
+          if [ -f "data/datastore/changedetection.db" ]; then
+            db_size=$(wc -c < "data/datastore/changedetection.db")
+            echo "✅ changedetection.db ready for cache: $db_size bytes"
+          else
+            echo "⚠️ changedetection.db not found - nothing to cache"
+          fi
+
       - name: Save service logs
         if: always()
         run: |
@@ -412,7 +370,7 @@ jobs:
           $DOCKER_COMPOSE_CMD -p "$DOCKER_COMPOSE_PROJECT" logs changedetection > "$DOCKER_LOG_DIR/changedetection.log" 2>&1 || true
           $DOCKER_COMPOSE_CMD -p "$DOCKER_COMPOSE_PROJECT" logs playwright-chrome > "$DOCKER_LOG_DIR/playwright.log" 2>&1 || true
 
-      - name: Upload monitoring reports
+      - name: Upload monitoring reports (optional)
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -420,17 +378,6 @@ jobs:
           path: data/reports/
           retention-days: 30
           if-no-files-found: warn
-
-      - name: Upload monitoring data for next run
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: monitoring-data
-          path: |
-            data/datastore/
-            data/reports/
-          retention-days: 30
-          if-no-files-found: ignore
 
       - name: Upload service logs
         if: always()
@@ -495,15 +442,9 @@ jobs:
           log_info "Cleaning up services (preserving data)..."
           $DOCKER_COMPOSE_CMD -p "$DOCKER_COMPOSE_PROJECT" down --remove-orphans --timeout 30 || true
           
-          # Preserve critical data files
-          log_info "Preserving datastore and reports for next run..."
-          mkdir -p preserved-data/
-          cp -r data/datastore preserved-data/ 2>/dev/null || true
-          cp -r data/reports preserved-data/ 2>/dev/null || true
-          
-          # Show what we're preserving
-          echo "📁 Preserved data:"
-          find preserved-data/ -type f -name "*.json" | head -10 || echo "No data to preserve"
+          # Show what data we're preserving for cache
+          echo "📁 Data preserved for next run cache:"
+          find data/ -type f -name "*.db" -o -name "*.json" | head -10 || echo "No data files to preserve"
           
           log_success "Cleanup completed with data preservation"
 
@@ -520,16 +461,17 @@ jobs:
             echo "- **Timestamp:** $(date -u +"%Y-%m-%d %H:%M:%S UTC")"
             echo "- **Status:** ${{ job.status }}"
             echo "- **First Run:** ${{ steps.check-first-run.outputs.first_run }}"
+            echo "- **Data Cache:** ${{ steps.data-cache.outputs.cache-hit }}"
             echo ""
             echo "**Artifacts:**"
             if [ "${{ job.status }}" = "success" ]; then
               echo "- ✅ Monitoring reports"
-              echo "- ✅ Monitoring data (for next run)"
               echo "- ✅ Service logs"
+              echo "- ✅ Data cached for next run"
             else
               echo "- ❌ Monitoring reports (may be incomplete)"
-              echo "- 📋 Monitoring data (preserved for next run)"
               echo "- 📋 Service logs"
+              echo "- 📋 Data cached for next run"
               echo "- 🔍 Failure diagnostics"
             fi
             echo ""
@@ -537,6 +479,6 @@ jobs:
             if [ "${{ steps.check-first-run.outputs.first_run }}" = "true" ]; then
               echo "- 🆕 First run - initializing datastore"
             else
-              echo "- 🔄 Continuing from previous run data"
+              echo "- 🔄 Continuing from cached data"
             fi
           } >> $GITHUB_STEP_SUMMARY

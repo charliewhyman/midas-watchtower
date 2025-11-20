@@ -25,8 +25,9 @@ class ChangedetectionService:
         """Get API headers with authentication"""
         headers = {"Content-Type": "application/json"}
         api_key = self.config.settings.changedetection_api_key
-        if api_key and api_key.strip():  # Only use if actually set
+        if api_key and api_key.strip():
             headers["x-api-key"] = api_key
+        return headers
     
     def wait_for_service(self, timeout: int = 10, check_api: bool = True) -> bool:
         """Wait for changedetection.io service to be ready
@@ -129,7 +130,6 @@ class ChangedetectionService:
     def _get_watch_detail(self, uuid: str) -> Optional[Dict[str, Any]]:
         """Get detailed watch information by UUID"""
         try:
-            # FIX: Use self.base_url properly
             response = requests.get(f"{self.base_url}/api/v1/watch/{uuid}", headers=self.headers, timeout=10)
             if response.status_code == 200:
                 return response.json()

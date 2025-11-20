@@ -46,27 +46,76 @@ jobs:
           # Start services with project name to avoid conflicts
           docker compose -p $DOCKER_COMPOSE_PROJECT up -d changedetection playwright-chrome
 
-      - name: Wait for changedetection.io
-        run: |
-          echo "Waiting for changedetection.io to be ready..."
-          for i in {1..30}; do
-            if curl -s -f http://localhost:5000/ > /dev/null; then
-              echo "Changedetection API is ready"
-              exit 0
-            fi
-            echo "Waiting for changedetection... attempt $i/30"
-            sleep 5
-          done
-          echo "ERROR: Changedetection never became ready"
-          docker compose -p $DOCKER_COMPOSE_PROJECT logs changedetection
-          exit 1
-
       - name: Extract API key from changedetection datastore
         run: |
-          CID=$(docker ps --format '{{.Names}}' | grep changedetection)
-          docker cp $CID:/datastore/url-watches.json url-watches.json
-          KEY=$(grep -oP '"api_access_token"\s*:\s*"\K[^"]+' url-watches.json)
-          echo "CHANGEDETECTION_API_KEY=$KEY" >> $GITHUB_ENV
+          echo "Waiting for changedetection container to be ready..."
+          # Wait for container to be running
+          for i in {1..30}; do
+            CID=$(docker ps --filter "status=running" --format '{{.Names}}' | grep changedetection || true)
+            if [ -n "$CID" ]; then
+              echo "Changedetection container is running: $CID"
+              break
+            fi
+            echo "Waiting for changedetection container... attempt $i/30"
+            sleep 2
+          done
+          
+          if [ -z "$CID" ]; then
+            echo "ERROR: Changedetection container never started"
+            docker compose -p $DOCKER_COMPOSE_PROJECT ps
+            exit 1
+          fi
+          
+          echo "Waiting for datastore file to be created..."
+          # Wait for the datastore file to exist
+          for i in {1..30}; do
+            if docker exec $CID sh -c '[ -f /datastore/url-watches.json ]' 2>/dev/null; then
+              echo "Datastore file found"
+              break
+            fi
+            echo "Waiting for datastore file... attempt $i/30"
+            sleep 2
+          done
+          
+          # Extract API key
+          docker cp $CID:/datastore/url-watches.json url-watches.json || true
+          
+          if [ -f url-watches.json ]; then
+            KEY=$(grep -oP '"api_access_token"\s*:\s*"\K[^"]+' url-watches.json || echo "")
+            if [ -n "$KEY" ]; then
+              echo "CHANGEDETECTION_API_KEY=$KEY" >> $GITHUB_ENV
+              echo "API key extracted successfully: ${KEY:0:8}..."
+            else
+              echo "WARNING: Could not extract API key from datastore"
+            fi
+          else
+            echo "WARNING: Could not copy datastore file"
+          fi
+
+      - name: Wait for changedetection.io API
+        run: |
+          echo "Waiting for changedetection.io API to be ready..."
+          
+          # Use extracted API key or fallback to secret
+          if [ -n "$CHANGEDETECTION_API_KEY" ]; then
+            API_KEY="$CHANGEDETECTION_API_KEY"
+            echo "Using extracted API key: ${API_KEY:0:8}..."
+          else
+            API_KEY="${{ secrets.CHANGEDETECTION_API_KEY }}"
+            echo "Using secret API key: ${API_KEY:0:8}..."
+          fi
+          
+          for i in {1..30}; do
+            if curl -s -f -H "x-api-key: $API_KEY" http://localhost:5000/api/v1/watch > /dev/null; then
+              echo "✅ Changedetection API is ready and responsive"
+              exit 0
+            fi
+            echo "Waiting for changedetection API... attempt $i/30"
+            sleep 5
+          done
+          echo "ERROR: Changedetection API never became ready"
+          docker compose -p $DOCKER_COMPOSE_PROJECT logs changedetection
+          exit 1
         
       - name: Prepare directories
         run: |
@@ -80,14 +129,19 @@ jobs:
         run: |
           set -e
           
-          echo "Using API key: ${CHANGEDETECTION_API_KEY:0:8}..."
+          # Use extracted API key
+          if [ -n "$CHANGEDETECTION_API_KEY" ]; then
+            echo "Using extracted API key: ${CHANGEDETECTION_API_KEY:0:8}..."
+            ACTUAL_API_KEY="$CHANGEDETECTION_API_KEY"
+          fi
           
-          # Simple health check without jq dependency
-          echo "Performing health check..."
-          if curl -s -f -H "x-api-key: $CHANGEDETECTION_API_KEY" http://localhost:5000/api/v1/watch > /dev/null; then
+          # Final health check with proper API key
+          echo "Performing final health check..."
+          if curl -s -f -H "x-api-key: $ACTUAL_API_KEY" http://localhost:5000/api/v1/watch > /dev/null; then
             echo "✅ Changedetection API health check passed"
           else
-            echo "⚠️ Health check failed, but continuing..."
+            echo "❌ Health check failed - API not accessible"
+            exit 1
           fi
           
           for attempt in {1..3}; do
@@ -96,7 +150,7 @@ jobs:
             echo "SHA: ${GITHUB_SHA:0:8}"
             
             if docker compose -p $DOCKER_COMPOSE_PROJECT run --rm \
-              -e CHANGEDETECTION_API_KEY \
+              -e CHANGEDETECTION_API_KEY="$ACTUAL_API_KEY" \
               -e CHANGEDETECTION_URL=http://changedetection:5000 \
               -e GITHUB_ACTIONS=true \
               -e GITHUB_RUN_ID=${{ github.run_id }} \

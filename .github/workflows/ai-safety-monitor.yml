@@ -118,7 +118,7 @@ jobs:
           path: |
             ~/.cache/docker
             /tmp/.buildx-cache
-          key: ${{ runner.os }}-docker-${{ hashFiles('docker-compose.yml', 'Dockerfile*', 'requirements.txt') }}
+          key: ${{ runner.os }}-docker-${{ hashFiles('docker-compose.yml', '**/Dockerfile*', '**/requirements.txt') }}
           restore-keys: |
             ${{ runner.os }}-docker-
 

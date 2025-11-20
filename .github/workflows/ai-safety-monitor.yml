@@ -27,8 +27,7 @@ jobs:
 
     strategy:
       fail-fast: false
-      matrix:
-        attempt: [1, 2, 3]
+      max-parallel: 1
     
     steps:
       - name: Checkout code
@@ -301,10 +300,38 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: monitoring-reports-${{ github.run_id }}
-          path: data/reports/
+          name: monitoring-reports-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            data/reports/
+            !data/reports/tmp/
+          compression-level: 9
           retention-days: 30
-          if-no-files-found: warn
+          if-no-files-found: error
+
+      - name: Archive old artifacts
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            // Keep only last 10 runs to save storage
+            const { data: artifacts } = await github.rest.actions.listArtifactsForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              per_page: 100
+            });
+            
+            const oldArtifacts = artifacts
+              .filter(art => art.name.includes('monitoring-reports-') || art.name.includes('service-logs-'))
+              .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+              .slice(10);
+            
+            for (const artifact of oldArtifacts) {
+              await github.rest.actions.deleteArtifact({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                artifact_id: artifact.id
+              });
+            }
 
       - name: Upload logs
         if: always()
@@ -366,6 +393,25 @@ jobs:
           name: failure-diagnostics-${{ github.run_id }}
           path: diagnostics/
           retention-days: 14
+
+      - name: Cleanup resources
+        if: always()
+        run: |
+          source .github/scripts/config.sh
+          source .github/scripts/logger.sh
+          
+          log_info "Performing comprehensive cleanup..."
+          
+          # Stop services
+          docker compose -p "$DOCKER_COMPOSE_PROJECT" down --remove-orphans --volumes --timeout 30
+          
+          # Clean up Docker resources
+          docker system prune -f --filter "until=24h" || true
+          
+          # Clean up temporary files
+          rm -rf "$LOCAL_DATASTORE" "$DOCKER_LOG_DIR" diagnostics/ || true
+          
+          log_success "Cleanup completed"
 
       - name: Tear down services
         if: always()

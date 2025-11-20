@@ -40,12 +40,23 @@ jobs:
           echo "📁 Scripts directory structure:"
           ls -la .github/scripts/ || echo "No scripts directory"
 
+      - name: List available artifacts
+        run: |
+          echo "Available artifacts in this repository:"
+          # This will list artifacts from previous runs
+          curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            "https://api.github.com/repos/${{ github.repository }}/actions/artifacts" | \
+            jq -r '.artifacts[] | "\(.name) - \(.created_at)"' | head -10 || \
+            echo "Could not fetch artifact list"
+            
       - name: Download previous monitoring data
         id: download-data
         uses: actions/download-artifact@v4
         with:
-          name: monitoring-data
+          name: monitoring-data-*
           path: data/
+          pattern: monitoring-data-*
+          merge-multiple: true
         continue-on-error: true
 
       - name: Debug download result

@@ -64,7 +64,7 @@ jobs:
       - name: Prepare directories
         run: |
           mkdir -p data/reports logs
-          chmod -R 755 data logs
+          chmod -R 777 data logs
 
       - name: Run monitoring cycle
         env:

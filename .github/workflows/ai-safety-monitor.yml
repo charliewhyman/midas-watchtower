@@ -111,33 +111,41 @@ jobs:
 
       - name: Setup Docker Buildx
         uses: docker/setup-buildx-action@v3
+        with:
+          driver: docker-container
+          buildkitd-flags: --debug
 
       - name: Cache Docker layers
         uses: actions/cache@v4
+        id: docker-cache
         with:
           path: |
             ~/.cache/docker
             /tmp/.buildx-cache
-          key: ${{ runner.os }}-docker-${{ hashFiles('docker-compose.yml', '**/Dockerfile*', '**/requirements.txt') }}
+            /var/lib/docker
+          key: ${{ runner.os }}-docker-${{ hashFiles('docker-compose.yml', 'Dockerfile', 'requirements.txt') }}
           restore-keys: |
             ${{ runner.os }}-docker-
 
-      - name: Cache Python requirements
+      - name: Cache Python packages
         uses: actions/cache@v4
+        id: pip-cache
         with:
           path: |
             ~/.cache/pip
+            /tmp/pip-cache
             **/__pycache__
-          key: ${{ runner.os }}-python-${{ hashFiles('**/requirements.txt', '**/setup.py', '**/pyproject.toml') }}
+            **/.pytest_cache
+          key: ${{ runner.os }}-python-${{ hashFiles('**/requirements.txt') }}
           restore-keys: |
             ${{ runner.os }}-python-
-                
+                  
       - name: Build and start services
         run: |
           source .github/scripts/logger.sh
           
-          log_info "Building metadata-monitor image..."
-          $DOCKER_COMPOSE_CMD build metadata-monitor
+          log_info "Building metadata-monitor image with cache..."
+          $DOCKER_COMPOSE_CMD build --progress plain --build-arg BUILDKIT_INLINE_CACHE=1 metadata-monitor
           
           log_info "Starting changedetection and playwright services..."
           $DOCKER_COMPOSE_CMD -p $DOCKER_COMPOSE_PROJECT up -d changedetection playwright-chrome

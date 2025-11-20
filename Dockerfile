@@ -2,14 +2,17 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install universal dependencies (wget works everywhere)
+# Install universal dependencies
 RUN apt-get update && apt-get install -y \
     wget \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    && apt-get clean
 
-# Copy requirements and install Python dependencies
+# Copy only requirements first for better layer caching
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+
+# Install Python dependencies with cache dir
+RUN pip install --cache-dir /tmp/pip-cache -r requirements.txt
 
 # Copy application code
 COPY . .

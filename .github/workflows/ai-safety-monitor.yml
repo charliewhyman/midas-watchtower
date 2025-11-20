@@ -61,6 +61,13 @@ jobs:
           docker compose -p $DOCKER_COMPOSE_PROJECT logs changedetection
           exit 1
 
+      - name: Extract API key from changedetection datastore
+        run: |
+          CID=$(docker ps --format '{{.Names}}' | grep changedetection)
+          docker cp $CID:/datastore/url-watches.json url-watches.json
+          KEY=$(grep -oP '"api_access_token"\s*:\s*"\K[^"]+' url-watches.json)
+          echo "CHANGEDETECTION_API_KEY=$KEY" >> $GITHUB_ENV
+        
       - name: Prepare directories
         run: |
           mkdir -p data/reports logs

@@ -207,11 +207,16 @@ jobs:
           
           log_success "Health check passed"
           
+          # Ensure logs directory is writable
+          mkdir -p "$LOG_DIR"
+          chmod 777 "$LOG_DIR"
+          
           # Run monitoring with retry logic
           for attempt in $(seq 1 "$MAX_MONITOR_ATTEMPTS"); do
             log_info "Monitoring Attempt $attempt/$MAX_MONITOR_ATTEMPTS"
             
             if $DOCKER_COMPOSE_CMD -p "$DOCKER_COMPOSE_PROJECT" run --rm \
+              -v "$(pwd)/$LOG_DIR:/app/logs" \
               -e CHANGEDETECTION_API_KEY="$API_KEY" \
               -e CHANGEDETECTION_URL="$CHANGEDETECTION_CONTAINER_URL" \
               -e GITHUB_ACTIONS=true \

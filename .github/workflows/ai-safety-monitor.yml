@@ -17,6 +17,8 @@ on:
 
 env:
   DOCKER_COMPOSE_PROJECT: ai-safety-monitor-${{ github.run_id }}
+  # Source config early for use in env section
+  CONFIG_SOURCED: "true"
 
 jobs:
   monitor:
@@ -26,6 +28,41 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+
+      - name: Verify prerequisites
+        run: |
+          # Check required tools exist
+          command -v docker || (echo "❌ docker not found"; exit 1)
+          command -v docker-compose || (echo "❌ docker-compose not found"; exit 1)
+          command -v curl || (echo "❌ curl not found"; exit 1)
+          command -v jq || (echo "❌ jq not found"; exit 1)
+          echo "✅ All prerequisites available"
+
+      - name: Setup environment
+        run: |
+          # Source config and make available to subsequent steps
+          source .github/scripts/config.sh
+          
+          # Export all config variables for subsequent steps
+          {
+            echo "CHANGEDETECTION_PORT=$CHANGEDETECTION_PORT"
+            echo "CHANGEDETECTION_HOST=$CHANGEDETECTION_HOST"
+            echo "CHANGEDETECTION_URL=$CHANGEDETECTION_URL"
+            echo "CHANGEDETECTION_CONTAINER_URL=$CHANGEDETECTION_CONTAINER_URL"
+            echo "MAX_WAIT_ATTEMPTS=$MAX_WAIT_ATTEMPTS"
+            echo "WAIT_INTERVAL=$WAIT_INTERVAL"
+            echo "MAX_MONITOR_ATTEMPTS=$MAX_MONITOR_ATTEMPTS"
+            echo "RESTART_DELAY=$RESTART_DELAY"
+            echo "DATASTORE_FILE=$DATASTORE_FILE"
+            echo "LOCAL_DATASTORE=$LOCAL_DATASTORE"
+            echo "API_KEY_FIELD=$API_KEY_FIELD"
+            echo "LOG_DIR=$LOG_DIR"
+            echo "DOCKER_LOG_DIR=$DOCKER_LOG_DIR"
+            echo "REPORT_DIR=$REPORT_DIR"
+          } >> $GITHUB_ENV
+          
+          echo "✅ Environment configured"
+          echo "Service URL: $CHANGEDETECTION_URL"
 
       - name: Setup Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -40,175 +77,204 @@ jobs:
 
       - name: Build and start services
         run: |
+          source .github/scripts/config.sh
+          source .github/scripts/logger.sh
+          
+          log_info "Building metadata-monitor image..."
           docker compose build metadata-monitor
+          
+          log_info "Starting changedetection and playwright services..."
           docker compose -p $DOCKER_COMPOSE_PROJECT up -d changedetection playwright-chrome
+          
+          log_success "Services started successfully"
 
       - name: Wait for basic connectivity
         run: |
-          echo "Waiting for changedetection basic connectivity..."
-          for i in {1..30}; do
-            if curl -s -f http://localhost:5000/ > /dev/null; then
-              echo "✅ Changedetection web interface is accessible"
-              break
-            fi
-            echo "Waiting for basic connectivity... attempt $i/30"
-            sleep 5
-          done
+          source .github/scripts/config.sh
+          source .github/scripts/logger.sh
+          
+          .github/scripts/wait-for-service.sh "$CHANGEDETECTION_URL" "$MAX_WAIT_ATTEMPTS" "$WAIT_INTERVAL"
 
       - name: Extract API key from changedetection datastore
+        id: extract-api-key
         run: |
-          echo "Extracting API key from changedetection..."
+          source .github/scripts/config.sh
+          source .github/scripts/logger.sh
+          
+          log_info "Extracting API key from changedetection..."
+          
+          # Get container ID
           CID=$(docker ps --filter "status=running" --filter "name=.*changedetection" \
             --format '{{.Names}}' | head -1)
+          
           if [ -z "$CID" ]; then
-            echo "❌ ERROR: changedetection container not found"
+            log_failure "changedetection container not found"
             exit 1
           fi
           
+          log_info "Container ID: $CID"
+          
           # Wait for datastore file
-          for i in {1..20}; do
-            if docker exec $CID sh -c '[ -f /datastore/url-watches.json ]' 2>/dev/null; then
+          log_info "Waiting for datastore file: $DATASTORE_FILE"
+          for i in $(seq 1 20); do
+            if docker exec "$CID" sh -c "[ -f $DATASTORE_FILE ]" 2>/dev/null; then
+              log_success "Datastore file found"
               break
             fi
+            log_info "Waiting for datastore... attempt $i/20"
             sleep 3
           done
           
-          if ! docker cp $CID:/datastore/url-watches.json url-watches.json; then
-            echo "❌ ERROR: Failed to extract datastore"
+          # Copy datastore
+          log_info "Copying datastore to local filesystem..."
+          if ! docker cp "$CID:$DATASTORE_FILE" "$LOCAL_DATASTORE"; then
+            log_failure "Failed to extract datastore"
             exit 1
           fi
           
-          if [ -f url-watches.json ]; then
-            KEY=$(grep -oP '"api_access_token"\s*:\s*"\K[^"]+' url-watches.json || echo "")
-            if [ -n "$KEY" ]; then
-              echo "CHANGEDETECTION_API_KEY=$KEY" >> $GITHUB_ENV
-              echo "API key extracted."
-            else
-              echo "❌ ERROR: Could not extract API key from url-watches.json"
-              exit 1
-            fi
-          else
-            echo "❌ ERROR: url-watches.json not found in datastore"
+          if [ ! -f "$LOCAL_DATASTORE" ]; then
+            log_failure "Datastore file not found locally"
             exit 1
           fi
+          
+          # Extract API key using proper script
+          log_info "Extracting API key..."
+          API_KEY=$(.github/scripts/extract-api-key.sh "$LOCAL_DATASTORE")
+          
+          # Store in environment for next steps
+          echo "api_key=$API_KEY" >> $GITHUB_OUTPUT
+          echo "CHANGEDETECTION_API_KEY=$API_KEY" >> $GITHUB_ENV
+          
+          log_success "API key extracted successfully"
 
       - name: Test systeminfo endpoint
+        env:
+          API_KEY: ${{ steps.extract-api-key.outputs.api_key }}
         run: |
-          echo "=== Testing systeminfo endpoint ==="
+          source .github/scripts/config.sh
+          source .github/scripts/logger.sh
           
-          API_KEY="$CHANGEDETECTION_API_KEY"
-          echo "Using extracted API key: ${API_KEY:0:8}..."
+          log_info "Testing systeminfo endpoint..."
           
-          echo "--- Testing: curl -X GET http://localhost:5000/api/v1/systeminfo -H 'x-api-key: XXX' ---"
-          
-          # Test systeminfo endpoint with verbose output
-          response=$(curl -v -X GET "http://localhost:5000/api/v1/systeminfo" \
+          response=$(curl -v -X GET "$CHANGEDETECTION_URL/api/v1/systeminfo" \
             -H "x-api-key: $API_KEY" \
             -w "\n%{http_code}" 2>&1)
           
-          echo "--- Full Response ---"
-          echo "$response"
-          echo "--- End Response ---"
-          
-          # Extract HTTP status code
           http_code=$(echo "$response" | tail -1)
-          echo "HTTP Status Code: $http_code"
           
           if [ "$http_code" = "200" ]; then
-            echo "✅ systeminfo endpoint successful!"
-            exit 0
+            log_success "systeminfo endpoint returned HTTP 200"
           else
-            echo "❌ systeminfo endpoint returned HTTP $http_code"
-            
-            # Test other potential endpoints
-            echo "--- Testing other endpoints ---"
-            endpoints=("/api/v1/version" "/api/v1/overview" "/api/v1/")
-            for endpoint in "${endpoints[@]}"; do
-              echo "Testing $endpoint:"
-              curl -s -o /dev/null -w "%{http_code}" -H "x-api-key: $API_KEY" "http://localhost:5000$endpoint" | xargs echo "HTTP"
-            done
+            log_failure "systeminfo endpoint returned HTTP $http_code"
+            log_info "Full response:"
+            echo "$response"
             exit 1
           fi
 
       - name: Wait for API to be ready
+        env:
+          API_KEY: ${{ steps.extract-api-key.outputs.api_key }}
         run: |
-          echo "Waiting for API to be ready using systeminfo endpoint..."
+          source .github/scripts/config.sh
+          source .github/scripts/logger.sh
           
-          API_KEY="$CHANGEDETECTION_API_KEY"
+          log_info "Waiting for API to be ready..."
           
-          for i in {1..30}; do
+          for i in $(seq 1 "$MAX_WAIT_ATTEMPTS"); do
             http_code=$(curl -s -o /dev/null -w "%{http_code}" \
-              -X GET "http://localhost:5000/api/v1/systeminfo" \
+              -X GET "$CHANGEDETECTION_URL/api/v1/systeminfo" \
               -H "x-api-key: $API_KEY")
-              
+            
             if [ "$http_code" = "200" ]; then
-              echo "✅ API is ready and responding correctly via systeminfo"
+              log_success "API is ready (HTTP 200)"
               exit 0
             fi
             
-            echo "systeminfo returned HTTP $http_code, waiting... attempt $i/30"
-            sleep 5
+            log_info "API returned HTTP $http_code, waiting... attempt $i/$MAX_WAIT_ATTEMPTS"
+            sleep "$WAIT_INTERVAL"
           done
           
-          echo "❌ API never returned 200 status on systeminfo"
+          log_failure "API never returned 200 status"
           docker compose -p $DOCKER_COMPOSE_PROJECT logs changedetection --tail=20
           exit 1
-        
+
       - name: Prepare directories
         run: |
-          mkdir -p data/reports logs
-          chmod -R 777 data logs
+          source .github/scripts/config.sh
+          source .github/scripts/logger.sh
+          
+          log_info "Creating required directories..."
+          mkdir -p "$REPORT_DIR" "$LOG_DIR"
+          chmod -R 777 "$REPORT_DIR" "$LOG_DIR"
+          log_success "Directories prepared"
 
       - name: Run monitoring cycle
+        env:
+          API_KEY: ${{ steps.extract-api-key.outputs.api_key }}
+          VERBOSE: ${{ github.event.inputs.run_type == 'verbose' || github.event.inputs.run_type == 'debug' }}
+          DEBUG: ${{ github.event.inputs.run_type == 'debug' }}
         run: |
           set -e
           
-          # Use ONLY the extracted API key from datastore
-          ACTUAL_API_KEY="$CHANGEDETECTION_API_KEY"
-          echo "Using extracted API key: ${ACTUAL_API_KEY:0:8}..."
+          source .github/scripts/config.sh
+          source .github/scripts/logger.sh
           
-          echo "Performing final health check with tested API call..."
+          # Enable debug mode if requested
+          if [ "$DEBUG" = "true" ]; then
+            set -x
+            export PS4='+ $(date -u "+%H:%M:%S") '
+            log_info "DEBUG mode enabled"
+          fi
+          
+          log_info "Performing final health check..."
           http_code=$(curl -s -o /dev/null -w "%{http_code}" \
-            -X GET "http://localhost:5000/api/v1/watch" \
-            -H "x-api-key: $ACTUAL_API_KEY")
-            
-          if [ "$http_code" = "200" ]; then
-            echo "✅ Health check passed - API responding with 200"
-          else
-            echo "❌ Health check failed - API returned HTTP $http_code"
+            -X GET "$CHANGEDETECTION_URL/api/v1/watch" \
+            -H "x-api-key: $API_KEY")
+          
+          if [ "$http_code" != "200" ]; then
+            log_failure "Health check failed - API returned HTTP $http_code"
             exit 1
           fi
           
-          for attempt in {1..3}; do
-            echo "=== Monitoring Attempt $attempt/3 ==="
+          log_success "Health check passed"
+          
+          # Run monitoring with retry logic
+          for attempt in $(seq 1 "$MAX_MONITOR_ATTEMPTS"); do
+            log_info "Monitoring Attempt $attempt/$MAX_MONITOR_ATTEMPTS"
             
-            if docker compose -p $DOCKER_COMPOSE_PROJECT run --rm \
-              -e CHANGEDETECTION_API_KEY="$ACTUAL_API_KEY" \
-              -e CHANGEDETECTION_URL=http://changedetection:5000 \
+            if docker compose -p "$DOCKER_COMPOSE_PROJECT" run --rm \
+              -e CHANGEDETECTION_API_KEY="$API_KEY" \
+              -e CHANGEDETECTION_URL="$CHANGEDETECTION_CONTAINER_URL" \
               -e GITHUB_ACTIONS=true \
-              -e GITHUB_RUN_ID=${{ github.run_id }} \
-              -e GITHUB_RUN_ATTEMPT=${{ github.run_attempt }} \
-              -e GITHUB_SHA=${{ github.sha }} \
-              -e GITHUB_REF=${{ github.ref }} \
-              -e MONITOR_RUN_TYPE=${{ github.event.inputs.run_type || 'standard' }} \
+              -e GITHUB_RUN_ID="$GITHUB_RUN_ID" \
+              -e GITHUB_RUN_ATTEMPT="$GITHUB_RUN_ATTEMPT" \
+              -e GITHUB_SHA="$GITHUB_SHA" \
+              -e GITHUB_REF="$GITHUB_REF" \
+              -e MONITOR_RUN_TYPE="${{ github.event.inputs.run_type || 'standard' }}" \
+              -e VERBOSE="$VERBOSE" \
               metadata-monitor python run_monitor.py; then
               
-              echo "✅ Monitoring completed successfully on attempt $attempt"
+              log_success "Monitoring completed successfully on attempt $attempt"
               break
             else
-              echo "❌ Monitoring failed on attempt $attempt"
-              if [ $attempt -lt 3 ]; then
-                echo "Retrying in 15 seconds..."
-                sleep 15
-                docker compose -p $DOCKER_COMPOSE_PROJECT restart changedetection
+              log_failure "Monitoring failed on attempt $attempt"
+              
+              if [ "$attempt" -lt "$MAX_MONITOR_ATTEMPTS" ]; then
+                log_info "Retrying in ${RESTART_DELAY}s..."
+                sleep "$RESTART_DELAY"
+                
+                log_info "Restarting changedetection service..."
+                docker compose -p "$DOCKER_COMPOSE_PROJECT" restart changedetection
                 sleep 10
               else
+                log_failure "All monitoring attempts failed"
                 exit 1
               fi
             fi
           done
 
       - name: Upload monitoring reports
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: monitoring-reports-${{ github.run_id }}
@@ -228,9 +294,11 @@ jobs:
       - name: Save service logs
         if: always()
         run: |
-          mkdir -p docker-logs
-          docker compose -p $DOCKER_COMPOSE_PROJECT logs changedetection > docker-logs/changedetection.log 2>&1 || true
-          docker compose -p $DOCKER_COMPOSE_PROJECT logs playwright-chrome > docker-logs/playwright.log 2>&1 || true
+          source .github/scripts/config.sh
+          
+          mkdir -p "$DOCKER_LOG_DIR"
+          docker compose -p "$DOCKER_COMPOSE_PROJECT" logs changedetection > "$DOCKER_LOG_DIR/changedetection.log" 2>&1 || true
+          docker compose -p "$DOCKER_COMPOSE_PROJECT" logs playwright-chrome > "$DOCKER_LOG_DIR/playwright.log" 2>&1 || true
 
       - name: Upload service logs
         if: always()
@@ -240,24 +308,74 @@ jobs:
           path: docker-logs/
           retention-days: 7
 
+      - name: Collect diagnostics on failure
+        if: failure()
+        run: |
+          source .github/scripts/config.sh
+          source .github/scripts/logger.sh
+          
+          mkdir -p diagnostics
+          
+          log_info "Collecting system diagnostics..."
+          
+          # System info
+          uname -a > diagnostics/system-info.txt
+          df -h >> diagnostics/system-info.txt
+          
+          # Docker status
+          docker ps -a > diagnostics/docker-containers.txt 2>&1 || true
+          docker network ls > diagnostics/docker-networks.txt 2>&1 || true
+          docker volume ls > diagnostics/docker-volumes.txt 2>&1 || true
+          
+          # Network diagnostics
+          netstat -tulpn > diagnostics/network-status.txt 2>&1 || true
+          
+          # Full service logs
+          docker compose -p "$DOCKER_COMPOSE_PROJECT" logs > diagnostics/full-compose-logs.txt 2>&1 || true
+          
+          log_success "Diagnostics collected"
+
+      - name: Upload diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: failure-diagnostics-${{ github.run_id }}
+          path: diagnostics/
+          retention-days: 14
+
       - name: Tear down services
         if: always()
         run: |
-          docker compose -p $DOCKER_COMPOSE_PROJECT down --remove-orphans
+          source .github/scripts/config.sh
+          source .github/scripts/logger.sh
+          
+          log_info "Tearing down services..."
+          docker compose -p "$DOCKER_COMPOSE_PROJECT" down --remove-orphans
+          log_success "Services torn down"
 
       - name: Create workflow summary
         if: always()
         run: |
-          echo "## AI Safety Monitor Run Summary" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Run Details:**" >> $GITHUB_STEP_SUMMARY
-          echo "- **Type:** ${{ github.event.inputs.run_type || 'standard' }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Branch:** ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Commit:** ${GITHUB_SHA:0:8}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Timestamp:** $(date -u +"%Y-%m-%d %H:%M:%S UTC")" >> $GITHUB_STEP_SUMMARY
-          echo "- **Status:** ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Artifacts:**" >> $GITHUB_STEP_SUMMARY
-          echo "- Monitoring reports" >> $GITHUB_STEP_SUMMARY
-          echo "- Application logs" >> $GITHUB_STEP_SUMMARY
-          echo "- Service logs" >> $GITHUB_STEP_SUMMARY
+          source .github/scripts/config.sh
+          
+          {
+            echo "## AI Safety Monitor Run Summary"
+            echo ""
+            echo "**Run Details:**"
+            echo "- **Type:** ${{ github.event.inputs.run_type || 'standard' }}"
+            echo "- **Branch:** ${{ github.ref_name }}"
+            echo "- **Commit:** ${{ github.sha }}"
+            echo "- **Timestamp:** $(date -u +"%Y-%m-%d %H:%M:%S UTC")"
+            echo "- **Status:** ${{ job.status }}"
+            echo ""
+            echo "**Configuration:**"
+            echo "- **Service URL:** $CHANGEDETECTION_URL"
+            echo "- **Max Wait Attempts:** $MAX_WAIT_ATTEMPTS"
+            echo "- **Wait Interval:** ${WAIT_INTERVAL}s"
+            echo "- **Max Monitor Attempts:** $MAX_MONITOR_ATTEMPTS"
+            echo ""
+            echo "**Artifacts:**"
+            echo "- Monitoring reports"
+            echo "- Application logs"
+            echo "- Service logs"
+          } >> $GITHUB_STEP_SUMMARY

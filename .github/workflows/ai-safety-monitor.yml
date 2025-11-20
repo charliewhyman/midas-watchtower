@@ -41,11 +41,24 @@ jobs:
           ls -la .github/scripts/ || echo "No scripts directory"
 
       - name: Download previous monitoring data
+        id: download-data
         uses: actions/download-artifact@v4
         with:
           name: monitoring-data
           path: data/
         continue-on-error: true
+
+      - name: Debug download result
+        run: |
+          echo "Download step result:"
+          echo "Exit code: ${{ steps.download-data.outcome }}"
+          echo "Artifact files downloaded:"
+          find data/ -type f 2>/dev/null | while read file; do
+            echo "  - $file ($(wc -c < "$file") bytes)"
+          done || echo "No files found"
+          echo "Current directory: $(pwd)"
+          echo "Data directory contents:"
+          ls -la data/ 2>/dev/null || echo "No data directory"
 
       - name: Verify downloaded artifacts
         run: |

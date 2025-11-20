@@ -156,7 +156,6 @@ class ChangedetectionService:
         
         try:
             update_payload = {"check_interval": check_interval}
-            # FIX: Use self.base_url properly
             response = requests.patch(
                 f"{self.base_url}/api/v1/watch/{watch['uuid']}",
                 json=update_payload,
@@ -181,7 +180,6 @@ class ChangedetectionService:
         }
         
         try:
-            # FIX: Use self.base_url properly
             response = requests.post(
                 f"{self.base_url}/api/v1/watch",
                 json=payload,

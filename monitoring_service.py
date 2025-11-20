@@ -105,7 +105,8 @@ class MonitoringService:
         logger.info("=" * 50)
         
         all_changes: List[DetectedChange] = []
-        urls_checked = 0  # Track this locally
+        urls_checked = 0
+        sheets_results = {'successful': 0, 'failed': 0}
         
         try:
             # Step 1: Check for content changes via changedetection.io
@@ -119,11 +120,12 @@ class MonitoringService:
             all_changes.extend(metadata_changes)
             urls_checked = checked_count
             
-            # Step 3: Log changes to Google Sheets
-            logger.info("Step 3: Logging changes to Google Sheets...")
-            sheets_results = self._log_changes_to_sheets(all_changes)
-            stats.sheets_logged = sheets_results['successful']
-            stats.sheets_failed = sheets_results['failed']
+            # Step 3: Log changes to Google Sheets if there are changes
+            if metadata_changes or content_changes:
+                logger.info("Step 3: Logging changes to Google Sheets...")
+                sheets_results = self._log_changes_to_sheets(all_changes)
+                stats.sheets_logged = sheets_results['successful']
+                stats.sheets_failed = sheets_results['failed']
             
             # Step 4: Generate reports
             logger.info("Step 4: Generating reports...")
@@ -132,7 +134,7 @@ class MonitoringService:
             # Update final statistics
             stats.end_time = datetime.now()
             stats.duration_seconds = (stats.end_time - stats.start_time).total_seconds()
-            stats.urls_checked = urls_checked  # Use the actual count
+            stats.urls_checked = urls_checked
             stats.changes_detected = len(all_changes)
             stats.errors = sheets_results['failed']
                 

@@ -76,21 +76,20 @@ jobs:
               echo "CHANGEDETECTION_API_KEY=$KEY" >> $GITHUB_ENV
               echo "API key extracted: ${KEY:0:8}..."
             else
-              echo "WARNING: Could not extract API key from url-watches.json"
+              echo "❌ ERROR: Could not extract API key from url-watches.json"
+              exit 1
             fi
+          else
+            echo "❌ ERROR: url-watches.json not found in datastore"
+            exit 1
           fi
 
       - name: Test systeminfo endpoint
         run: |
           echo "=== Testing systeminfo endpoint ==="
           
-          if [ -n "$CHANGEDETECTION_API_KEY" ]; then
-            API_KEY="$CHANGEDETECTION_API_KEY"
-            echo "Using extracted API key: ${API_KEY:0:8}..."
-          else
-            API_KEY="${{ secrets.CHANGEDETECTION_API_KEY }}"
-            echo "Using secret API key: ${API_KEY:0:8}..."
-          fi
+          API_KEY="$CHANGEDETECTION_API_KEY"
+          echo "Using extracted API key: ${API_KEY:0:8}..."
           
           echo "--- Testing: curl -X GET http://localhost:5000/api/v1/systeminfo -H 'x-api-key: XXX' ---"
           
@@ -127,11 +126,7 @@ jobs:
         run: |
           echo "Waiting for API to be ready using systeminfo endpoint..."
           
-          if [ -n "$CHANGEDETECTION_API_KEY" ]; then
-            API_KEY="$CHANGEDETECTION_API_KEY"
-          else
-            API_KEY="${{ secrets.CHANGEDETECTION_API_KEY }}"
-          fi
+          API_KEY="$CHANGEDETECTION_API_KEY"
           
           for i in {1..30}; do
             http_code=$(curl -s -o /dev/null -w "%{http_code}" \
@@ -160,7 +155,7 @@ jobs:
         run: |
           set -e
           
-          # Use ONLY the extracted API key that we know works
+          # Use ONLY the extracted API key from datastore
           ACTUAL_API_KEY="$CHANGEDETECTION_API_KEY"
           echo "Using extracted API key: ${ACTUAL_API_KEY:0:8}..."
           
@@ -187,17 +182,6 @@ jobs:
               -e GITHUB_RUN_ATTEMPT=${{ github.run_attempt }} \
               -e GITHUB_SHA=${{ github.sha }} \
               -e GITHUB_REF=${{ github.ref }} \
-              -e GOOGLE_SHEETS_USE_ENV=true \
-              -e GOOGLE_SHEETS_TYPE=${{ secrets.GOOGLE_SHEETS_TYPE }} \
-              -e GOOGLE_SHEETS_PROJECT_ID=${{ secrets.GOOGLE_SHEETS_PROJECT_ID }} \
-              -e GOOGLE_SHEETS_PRIVATE_KEY_ID=${{ secrets.GOOGLE_SHEETS_PRIVATE_KEY_ID }} \
-              -e GOOGLE_SHEETS_PRIVATE_KEY="${{ secrets.GOOGLE_SHEETS_PRIVATE_KEY }}" \
-              -e GOOGLE_SHEETS_CLIENT_EMAIL=${{ secrets.GOOGLE_SHEETS_CLIENT_EMAIL }} \
-              -e GOOGLE_SHEETS_CLIENT_ID=${{ secrets.GOOGLE_SHEETS_CLIENT_ID }} \
-              -e GOOGLE_SHEETS_AUTH_URI=${{ secrets.GOOGLE_SHEETS_AUTH_URI }} \
-              -e GOOGLE_SHEETS_TOKEN_URI=${{ secrets.GOOGLE_SHEETS_TOKEN_URI }} \
-              -e GOOGLE_SHEETS_AUTH_PROVIDER_X509_CERT_URL=${{ secrets.GOOGLE_SHEETS_AUTH_PROVIDER_X509_CERT_URL }} \
-              -e GOOGLE_SHEETS_CLIENT_X509_CERT_URL=${{ secrets.GOOGLE_SHEETS_CLIENT_X509_CERT_URL }} \
               -e MONITOR_RUN_TYPE=${{ github.event.inputs.run_type || 'standard' }} \
               metadata-monitor python run_monitor.py; then
               

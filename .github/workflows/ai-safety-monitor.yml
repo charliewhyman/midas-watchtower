@@ -74,7 +74,7 @@ jobs:
             KEY=$(grep -oP '"api_access_token"\s*:\s*"\K[^"]+' url-watches.json || echo "")
             if [ -n "$KEY" ]; then
               echo "CHANGEDETECTION_API_KEY=$KEY" >> $GITHUB_ENV
-              echo "API key extracted: ${KEY:0:8}..."
+              echo "API key extracted."
             else
               echo "❌ ERROR: Could not extract API key from url-watches.json"
               exit 1

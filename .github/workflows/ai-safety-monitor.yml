@@ -269,6 +269,12 @@ jobs:
           VERBOSE: ${{ github.event.inputs.run_type == 'verbose' || github.event.inputs.run_type == 'debug' }}
           DEBUG: ${{ github.event.inputs.run_type == 'debug' }}
           FIRST_RUN: ${{ steps.check-first-run.outputs.first_run }}
+          GOOGLE_SHEETS_TYPE: ${{ secrets.GOOGLE_SHEETS_TYPE }}
+          GOOGLE_SHEETS_PROJECT_ID: ${{ secrets.GOOGLE_SHEETS_PROJECT_ID }}
+          GOOGLE_SHEETS_PRIVATE_KEY_ID: ${{ secrets.GOOGLE_SHEETS_PRIVATE_KEY_ID }}
+          GOOGLE_SHEETS_PRIVATE_KEY: ${{ secrets.GOOGLE_SHEETS_PRIVATE_KEY }}
+          GOOGLE_SHEETS_CLIENT_EMAIL: ${{ secrets.GOOGLE_SHEETS_CLIENT_EMAIL }}
+          GOOGLE_SHEETS_CLIENT_ID: ${{ secrets.GOOGLE_SHEETS_CLIENT_ID }}
         run: |
           set -e
           source .github/scripts/logger.sh

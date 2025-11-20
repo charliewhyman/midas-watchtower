@@ -122,6 +122,16 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-docker-
 
+      - name: Cache Python requirements
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/pip
+            **/__pycache__
+          key: ${{ runner.os }}-python-${{ hashFiles('**/requirements.txt', '**/setup.py', '**/pyproject.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-python-
+                
       - name: Build and start services
         run: |
           source .github/scripts/logger.sh

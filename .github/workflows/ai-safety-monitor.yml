@@ -68,7 +68,10 @@ jobs:
             sleep 3
           done
           
-          docker cp $CID:/datastore/url-watches.json url-watches.json || true
+          if ! docker cp $CID:/datastore/url-watches.json url-watches.json; then
+            echo "❌ ERROR: Failed to extract datastore"
+            exit 1
+          fi
           
           if [ -f url-watches.json ]; then
             KEY=$(grep -oP '"api_access_token"\s*:\s*"\K[^"]+' url-watches.json || echo "")

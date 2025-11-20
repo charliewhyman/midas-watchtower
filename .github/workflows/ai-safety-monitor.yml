@@ -165,7 +165,7 @@ jobs:
       - name: Tear down services
         if: always()
         run: |
-          docker compose -p $DOCKER_COMPOSE_PROJECT down -v --remove-orphans
+          docker compose -p $DOCKER_COMPOSE_PROJECT down --remove-orphans
 
       - name: Create workflow summary
         if: always()

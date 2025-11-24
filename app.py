@@ -78,7 +78,8 @@ async def health_check(service: MonitoringService = Depends(get_monitor_service)
         "timestamp": datetime.now().isoformat(),
         "sheets_connected": status['sheets_connected'],
         "changedetection_available": status['changedetection_available'],
-        "total_urls": status['total_monitored_urls']
+        "total_urls": status['total_monitored_urls'],
+        "central_check_interval": service.config.central_check_interval
     }
 
 
@@ -115,7 +116,8 @@ async def status(service: MonitoringService = Depends(get_monitor_service)):
         return {
             "status": "operational",
             "timestamp": datetime.now().isoformat(),
-            **status_info
+            **status_info,
+            "central_check_interval": service.config.central_check_interval
         }
     except Exception as e:
         logger.error(f"Status check failed: {e}")
@@ -140,7 +142,6 @@ async def list_urls(service: MonitoringService = Depends(get_monitor_service)):
         for url_config in service.config.url_configs:
             urls.append({
                 "url": url_config.url,
-                "check_interval": url_config.check_interval,
                 "type": url_config.type,
                 "priority": url_config.priority
             })
@@ -148,11 +149,31 @@ async def list_urls(service: MonitoringService = Depends(get_monitor_service)):
         return {
             "urls": urls,
             "total": len(urls),
+            "central_check_interval": service.config.central_check_interval,
             "timestamp": datetime.now().isoformat()
         }
     except Exception as e:
         logger.error(f"Failed to list URLs: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to list URLs: {e}")
+
+
+@app.get("/api/config")
+async def get_config(service: MonitoringService = Depends(get_monitor_service)):
+    """Get current configuration"""
+    try:
+        return {
+            "central_check_interval": service.config.central_check_interval,
+            "polling_interval": service.config.scheduling.polling_interval,
+            "total_monitored_urls": len(service.config.url_configs),
+            "url_priorities": {
+                "high": len([u for u in service.config.url_configs if u.priority == "high"]),
+                "medium": len([u for u in service.config.url_configs if u.priority == "medium"]),
+                "low": len([u for u in service.config.url_configs if u.priority == "low"])
+            }
+        }
+    except Exception as e:
+        logger.error(f"Failed to get config: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get config: {e}")
 
 
 # Security-conscious debug endpoints (should be disabled in production)
@@ -164,58 +185,85 @@ async def debug_status(service: MonitoringService = Depends(get_monitor_service)
         "service_initialized": _monitor_service is not None,
         "scheduler_status": status_info['scheduler'],
         "first_run": status_info['first_run'],
+        "central_check_interval": service.config.central_check_interval,
         "environment": {
             "github_actions": os.getenv('GITHUB_ACTIONS') == 'true',
             "config_file_exists": os.path.exists('config.yaml')
         }
     }
 
+
 @app.post("/api/setup-watches")
 async def setup_watches(service: MonitoringService = Depends(get_monitor_service)):
     """Trigger changedetection.io watch setup"""
     try:
         service.changedetection_service.setup_watches(service.change_detector)
-        return {"status": "success", "message": "Watches setup completed"}
+        return {
+            "status": "success", 
+            "message": "Watches setup completed",
+            "central_interval_used": service.config.central_check_interval
+        }
     except Exception as e:
         logger.error(f"Failed to setup watches: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to setup watches: {e}")
+
 
 @app.get("/api/watches")
 async def list_watches(service: MonitoringService = Depends(get_monitor_service)):
     """List current watches in changedetection.io"""
     try:
-        watches = service.changedetection_service._get_existing_watches()
+        watches = service.changedetection_service.get_existing_watches()
+        watch_list = []
+        for url, watch_info in watches.items():
+            watch_list.append({
+                "url": url,
+                "uuid": watch_info.get('uuid'),
+                "check_interval": watch_info.get('check_interval'),
+                "last_checked": watch_info.get('last_checked'),
+                "last_changed": watch_info.get('last_changed')
+            })
+        
         return {
             "total_watches": len(watches),
-            "watches": list(watches.keys())
+            "central_check_interval": service.config.central_check_interval,
+            "watches": watch_list
         }
     except Exception as e:
         logger.error(f"Failed to list watches: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to list watches: {e}")
 
-@app.post("/api/setup-watches")
-async def setup_watches(service: MonitoringService = Depends(get_monitor_service)):
-    """Trigger changedetection.io watch setup manually"""
-    try:
-        service._setup_changedetection_with_retry()
-        return {"status": "success", "message": "Watch setup completed"}
-    except Exception as e:
-        logger.error(f"Failed to setup watches: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to setup watches: {e}")
 
-@app.get("/api/watches")
-async def list_watches():
-    """List current watches in changedetection.io"""
+@app.post("/api/watches/sync")
+async def sync_watches(service: MonitoringService = Depends(get_monitor_service)):
+    """Sync watches with current configuration"""
     try:
-        response = requests.get("http://changedetection:5000/api/v1/watch", timeout=10)
-        if response.status_code == 200:
-            watches = response.json()
-            return {"total_watches": len(watches), "watches": watches}
-        else:
-            return {"error": f"API returned {response.status_code}"}
+        service.changedetection_service.setup_watches(service.change_detector)
+        return {
+            "status": "success",
+            "message": "Watches synchronized",
+            "central_interval_applied": service.config.central_check_interval
+        }
     except Exception as e:
-        return {"error": str(e)}
-    
+        logger.error(f"Failed to sync watches: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to sync watches: {e}")
+
+
+@app.delete("/api/watches/{url:path}")
+async def delete_watch(url: str, service: MonitoringService = Depends(get_monitor_service)):
+    """Delete a specific watch"""
+    try:
+        success = service.changedetection_service.delete_watch(url)
+        if success:
+            return {"status": "success", "message": f"Watch for {url} deleted"}
+        else:
+            raise HTTPException(status_code=404, detail=f"Watch for {url} not found")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to delete watch: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to delete watch: {e}")
+
+
 def main():
     """Main entry point for the application"""
     try:
@@ -227,6 +275,9 @@ def main():
             service = MonitoringService()
             stats = service.run_cycle()
             
+            # Log central interval info
+            logger.info(f"Central check interval: {service.config.central_check_interval}s")
+            
             # Exit with appropriate code
             if stats.errors > 0:
                 logger.warning("Monitoring completed with errors")
@@ -237,6 +288,7 @@ def main():
         
         # Continuous monitoring mode with API
         logger.info("Starting AI Safety Metadata Monitor in continuous mode...")
+        logger.info(f"Central check interval: {get_monitor_service().config.central_check_interval}s")
         
         # Start FastAPI server
         uvicorn.run(

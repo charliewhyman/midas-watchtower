@@ -2,6 +2,32 @@
 from datetime import datetime
 from typing import Dict, Any, List, Optional
 from pydantic import BaseModel
+import yaml
+
+
+class URLConfig(BaseModel):
+    """Configuration for a monitored URL"""
+    url: str
+    type: str
+    priority: str = "medium"
+
+class SchedulingConfig(BaseModel):
+    """Scheduling configuration"""
+    polling_interval: int = 300  # 5 minutes - how often to check for due URLs
+
+
+class AppConfig(BaseModel):
+    """Main application configuration"""
+    central_check_interval: int = 3600
+    monitored_urls: List[URLConfig]
+    scheduling: SchedulingConfig
+
+    @classmethod
+    def load_from_yaml(cls, file_path: str) -> 'AppConfig':
+        """Load configuration from YAML file"""
+        with open(file_path, 'r') as f:
+            data = yaml.safe_load(f)
+        return cls(**data)
 
 
 class UrlMetadata(BaseModel):
@@ -64,8 +90,12 @@ class MonitoringCycleStats(BaseModel):
 class UrlSchedule(BaseModel):
     """Scheduling information for a URL"""
     url: str
-    check_interval: int
     type: str
     priority: str
     last_checked: Optional[datetime] = None
     next_check: Optional[datetime] = None
+    
+    class Config:
+        json_encoders = {
+            datetime: lambda v: v.isoformat()
+        }

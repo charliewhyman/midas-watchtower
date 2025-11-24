@@ -27,6 +27,15 @@ class MonitoringService:
         # Load configuration first
         self.config = AppConfig(config_path)
         
+        # Log configuration summary
+        config_summary = self.config.get_config_summary()
+        logger.info(f"📊 Configuration Summary:")
+        logger.info(f"   • Central check interval: {config_summary['central_check_interval']}s")
+        logger.info(f"   • Polling interval: {config_summary['polling_interval']}s")
+        logger.info(f"   • Total URLs: {config_summary['total_urls']}")
+        logger.info(f"   • Priority distribution: {config_summary['priority_distribution']}")
+        logger.info(f"   • Type distribution: {config_summary['type_distribution']}")
+        
         # Detect first run status
         self.first_run = self._detect_first_run()
         logger.info(f"First run detected: {self.first_run}")
@@ -37,7 +46,7 @@ class MonitoringService:
         self.changedetection_service = ChangedetectionService(self.config)
         self.sheets_reporter = GoogleSheetsReporter(self.config)
         self.gh_reporter = GitHubReporter()
-        self.scheduler = UrlScheduler(self.config)
+        self.url_scheduler = UrlScheduler(self.config)  # Updated to use central interval
         
         # Initialize changedetection.io watches with robust retry logic
         self._setup_changedetection_with_retry()
@@ -358,6 +367,7 @@ class MonitoringService:
         logger.info("=" * 60)
         logger.info(f"Starting monitoring cycle {cycle_id}")
         logger.info(f"Run type: {'FIRST RUN 🆕' if self.first_run else 'CONTINUING RUN 🔄'}")
+        logger.info(f"Central check interval: {self.config.central_check_interval}s")
         logger.info("=" * 60)
         
         all_changes: List[DetectedChange] = []
@@ -418,12 +428,12 @@ class MonitoringService:
             return stats
     
     def _check_metadata_changes(self) -> tuple[List[DetectedChange], int]:
-        """Check for metadata changes on due URLs
+        """Check for metadata changes on due URLs using central interval
         
         Returns:
             Tuple of (changes_detected, urls_checked_count)
         """
-        due_urls = self.scheduler.get_due_urls()
+        due_urls = self.url_scheduler.get_due_urls()  # Updated to use central interval
         changes_detected = []
         urls_checked = 0
         
@@ -458,15 +468,16 @@ class MonitoringService:
                 else:
                     logger.debug(f"No metadata changes detected for {url}")
                 
-                # Update schedule
-                self.scheduler.update_schedule(url)
+                # Update schedule using central interval
+                self.url_scheduler.mark_url_as_checked(url, success=True)
                 
                 # Small delay between requests to be respectful
                 time.sleep(0.5)
                 
             except Exception as e:
                 logger.error(f"Error checking metadata for {url}: {e}")
-                # Continue with other URLs even if one fails
+                # Mark as checked but schedule retry sooner
+                self.url_scheduler.mark_url_as_checked(url, success=False)
         
         # Save history after processing all URLs
         try:
@@ -525,6 +536,7 @@ class MonitoringService:
         logger.info("=" * 60)
         logger.info(f"Cycle ID: {stats.cycle_id}")
         logger.info(f"Run Type: {'First Run 🆕' if self.first_run else 'Continuing Run 🔄'}")
+        logger.info(f"Central Check Interval: {self.config.central_check_interval}s")
         logger.info(f"Duration: {duration:.2f} seconds")
         logger.info(f"URLs checked: {stats.urls_checked}")
         logger.info(f"Changes detected: {stats.changes_detected}")
@@ -543,13 +555,17 @@ class MonitoringService:
     
     def get_status(self) -> Dict[str, any]:
         """Get current service status"""
+        scheduler_status = self.url_scheduler.get_status()
+        
         return {
             'first_run': self.first_run,
-            'scheduler': self.scheduler.get_status(),
+            'scheduler': scheduler_status,
             'sheets_connected': self.sheets_reporter.client is not None,
             'changedetection_available': self._wait_for_changedetection(timeout=5),
             'container_connectivity': self._check_container_connectivity(),
             'total_monitored_urls': len(self.config.url_configs),
+            'central_check_interval': self.config.central_check_interval,
+            'polling_interval': self.config.scheduling.polling_interval,
             'data_directories': {
                 'datastore': Path("data/datastore").exists(),
                 'reports': Path("data/reports").exists(),

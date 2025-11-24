@@ -18,8 +18,9 @@ class ChangedetectionService:
     def __init__(self, config: AppConfig):
         self.config = config
         self.base_url = config.settings.changedetection_url.rstrip('/')
+        self.central_check_interval = config.central_check_interval
         self.api_key = config.settings.changedetection_api_key
-        logger.info(f"🔧 Changedetection service initialized with URL: {self.base_url}")
+        logger.info(f"🔧 Changedetection service initialized with URL: {self.base_url}, central interval: {self.central_check_interval}s")
         self.headers = self._get_headers()
     
     def _get_headers(self) -> Dict[str, str]:
@@ -76,7 +77,7 @@ class ChangedetectionService:
             existing_watches = self._get_existing_watches()
             
             # Check if we got auth errors
-            if existing_watches is None:  # Modify _get_existing_watches to return None on auth error
+            if existing_watches is None:
                 logger.error("❌ Authentication failed - cannot setup watches")
                 raise Exception("changedetection.io authentication failed")
                 
@@ -139,24 +140,23 @@ class ChangedetectionService:
         return None
     
     def _sync_watches(self, existing_watches: Dict[str, Dict[str, Any]], change_detector: 'ChangeDetector') -> None:
-        """Sync URL configurations with changedetection.io"""
+        """Sync URL configurations with changedetection.io using central interval"""
         for url_config in self.config.url_configs:
             url = url_config.url
-            check_interval = url_config.check_interval
             
             if url in existing_watches:
-                self._update_existing_watch(existing_watches[url], check_interval)
+                self._update_existing_watch(existing_watches[url])
             else:
-                self._create_new_watch(url, check_interval, change_detector)
+                self._create_new_watch(url, change_detector)
     
-    def _update_existing_watch(self, watch: Dict[str, Any], check_interval: int) -> None:
-        """Update existing watch if interval changed"""
-        if watch.get('check_interval') == check_interval:
+    def _update_existing_watch(self, watch: Dict[str, Any]) -> None:
+        """Update existing watch to use central interval"""
+        if watch.get('check_interval') == self.central_check_interval:
             logger.debug(f"Watch already configured: {watch['url']}")
             return
         
         try:
-            update_payload = {"check_interval": check_interval}
+            update_payload = {"check_interval": self.central_check_interval}
             response = requests.patch(
                 f"{self.base_url}/api/v1/watch/{watch['uuid']}",
                 json=update_payload,
@@ -165,19 +165,19 @@ class ChangedetectionService:
             )
             
             if response.status_code == 200:
-                logger.info(f"Updated interval for {watch['url']}: {check_interval}s")
+                logger.info(f"Updated interval for {watch['url']}: {self.central_check_interval}s")
             else:
                 logger.warning(f"Failed to update {watch['url']}: {response.status_code}")
         except Exception as e:
             logger.error(f"Error updating watch {watch['url']}: {e}")
     
-    def _create_new_watch(self, url: str, check_interval: int, change_detector: 'ChangeDetector') -> None:
-        """Create new watch in changedetection.io"""
+    def _create_new_watch(self, url: str, change_detector: 'ChangeDetector') -> None:
+        """Create new watch in changedetection.io using central interval"""
         payload = {
             "url": url,
             "tag": "ai-safety",
             "title": f"AI Safety - {url}",
-            "check_interval": check_interval
+            "check_interval": self.central_check_interval
         }
         
         try:
@@ -189,7 +189,7 @@ class ChangedetectionService:
             )
             
             if response.status_code in [200, 201]:
-                logger.info(f"✅ Added to changedetection.io: {url} (interval: {check_interval}s)")
+                logger.info(f"✅ Added to changedetection.io: {url} (interval: {self.central_check_interval}s)")
                 # Initialize history for new watch
                 if url not in change_detector.history:
                     change_detector.history[url] = {
@@ -227,6 +227,7 @@ class ChangedetectionService:
                 change = self._detect_content_change(url, last_changed, last_checked)
                 if change:
                     changes_detected.append(change)
+                    # Update last checked time
                     change_detector.history.setdefault(url, {})['last_content_check'] = datetime.now().isoformat()
             
             # Save updated history
@@ -279,14 +280,53 @@ class ChangedetectionService:
         return self._get_existing_watches()
 
     def create_watch(self, url_config, change_detector: 'ChangeDetector') -> bool:
-        """Public method to create a new watch"""
+        """Public method to create a new watch using central interval"""
         try:
             self._create_new_watch(
                 url=url_config.url,
-                check_interval=url_config.check_interval,
                 change_detector=change_detector
             )
             return True
         except Exception as e:
             logger.error(f"Failed to create watch for {url_config.url}: {e}")
             return False
+
+    def delete_watch(self, url: str) -> bool:
+        """Delete a watch from changedetection.io"""
+        try:
+            existing_watches = self._get_existing_watches()
+            if url in existing_watches:
+                uuid = existing_watches[url].get('uuid')
+                if uuid:
+                    response = requests.delete(
+                        f"{self.base_url}/api/v1/watch/{uuid}",
+                        headers=self.headers,
+                        timeout=10
+                    )
+                    if response.status_code in [200, 204]:
+                        logger.info(f"✅ Deleted watch: {url}")
+                        return True
+                    else:
+                        logger.warning(f"Failed to delete watch {url}: {response.status_code}")
+            return False
+        except Exception as e:
+            logger.error(f"Error deleting watch {url}: {e}")
+            return False
+
+    def get_watch_history(self, url: str) -> Optional[List[Dict[str, Any]]]:
+        """Get history for a specific watch"""
+        try:
+            existing_watches = self._get_existing_watches()
+            if url in existing_watches:
+                uuid = existing_watches[url].get('uuid')
+                if uuid:
+                    response = requests.get(
+                        f"{self.base_url}/api/v1/watch/{uuid}/history",
+                        headers=self.headers,
+                        timeout=10
+                    )
+                    if response.status_code == 200:
+                        return response.json()
+        except Exception as e:
+            logger.error(f"Error fetching history for {url}: {e}")
+        return None

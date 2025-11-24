@@ -81,9 +81,14 @@ class MonitorSettings(BaseSettings):
 class UrlConfig(BaseSettings):
     """Configuration for a single monitored URL"""
     url: str
-    check_interval: int = 3600  # 1 hour
     type: str = "policy"  # policy, research, guideline, etc.
     priority: str = "medium"  # low, medium, high, critical
+    # Removed individual check_interval
+
+
+class SchedulingConfig(BaseSettings):
+    """Scheduling configuration"""
+    polling_interval: int = 300  # 5 minutes - how often to check for due URLs
 
 
 class AppConfig:
@@ -92,7 +97,9 @@ class AppConfig:
     def __init__(self, config_path: str = "config.yaml"):
         self.settings = MonitorSettings()
         self.config_path = Path(config_path)
+        self.central_check_interval: int = 3600  # Default: 1 hour
         self.url_configs: List[UrlConfig] = []
+        self.scheduling: SchedulingConfig = SchedulingConfig()
         self.load_config()
     
     def load_config(self) -> None:
@@ -109,17 +116,28 @@ class AppConfig:
     
     def _parse_config(self, config_data: Dict[str, Any]) -> None:
         """Parse configuration data"""
+        # Parse central check interval
+        self.central_check_interval = config_data.get('central_check_interval', 3600)
+        
         # Parse URL configurations
         for url_config in config_data.get('monitored_urls', []):
-            self.url_configs.append(UrlConfig(**url_config))
+            # Remove check_interval from URL config if present (for backward compatibility)
+            url_config_data = url_config.copy()
+            url_config_data.pop('check_interval', None)  # Remove individual intervals
+            self.url_configs.append(UrlConfig(**url_config_data))
         
-        # Override settings from config file
+        # Parse scheduling configuration
         if 'scheduling' in config_data:
-            self.settings.polling_interval = config_data['scheduling'].get('polling_interval', 300)
+            scheduling_data = config_data['scheduling']
+            self.scheduling = SchedulingConfig(**scheduling_data)
+            
+            # Override settings from config file
+            self.settings.polling_interval = scheduling_data.get('polling_interval', 300)
     
     def _create_default_config(self) -> None:
         """Create default configuration file"""
         default_config = {
+            'central_check_interval': 3600,
             'monitored_urls': [],
             'scheduling': {
                 'polling_interval': 300
@@ -142,10 +160,41 @@ class AppConfig:
                 errors.append(f"Duplicate URL: {url_config.url}")
             seen_urls.add(url_config.url)
             
-            if url_config.check_interval < 60:
-                errors.append(f"Check interval too short for {url_config.url}: {url_config.check_interval}")
+            # Validate URL format (basic check)
+            if not url_config.url.startswith(('http://', 'https://')):
+                errors.append(f"Invalid URL format: {url_config.url}")
+            
+            # Validate priority
+            if url_config.priority not in ['low', 'medium', 'high', 'critical']:
+                errors.append(f"Invalid priority for {url_config.url}: {url_config.priority}")
+        
+        # Validate central check interval
+        if self.central_check_interval < 300:  # Minimum 5 minutes
+            errors.append(f"Central check interval too short: {self.central_check_interval}s (minimum: 300s)")
+        
+        if self.central_check_interval > 86400:  # Maximum 1 day
+            errors.append(f"Central check interval too long: {self.central_check_interval}s (maximum: 86400s)")
         
         return errors
+    
+    def get_config_summary(self) -> Dict[str, Any]:
+        """Get configuration summary for logging and status"""
+        priority_counts = {}
+        type_counts = {}
+        
+        for url_config in self.url_configs:
+            priority_counts[url_config.priority] = priority_counts.get(url_config.priority, 0) + 1
+            type_counts[url_config.type] = type_counts.get(url_config.type, 0) + 1
+        
+        return {
+            'total_urls': len(self.url_configs),
+            'central_check_interval': self.central_check_interval,
+            'polling_interval': self.scheduling.polling_interval,
+            'priority_distribution': priority_counts,
+            'type_distribution': type_counts,
+            'changedetection_configured': bool(self.settings.changedetection_api_key),
+            'sheets_configured': self.settings.get_google_sheets_credential_source() != "file"
+        }
 
 
 class ConfigurationError(Exception):

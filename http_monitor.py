@@ -54,7 +54,7 @@ class HttpMonitor:
         Get comprehensive metadata for a URL.
         Uses HEAD requests first, falls back to GET if necessary.
         """
-        start_time = time.time()
+        start_time = time.monotonic()
         
         try:
             # Try HEAD request first (more efficient)
@@ -73,7 +73,7 @@ class HttpMonitor:
                 final_url=str(response.url),
             )
             
-            duration = time.time() - start_time
+            duration = time.monotonic() - start_time
             logger.debug(f"Metadata collected for {url} in {duration:.2f}s")
             
             return metadata

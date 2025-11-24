@@ -11,6 +11,9 @@ services:
       - PLAYWRIGHT_DRIVER_URL=playwright-chrome
       - API_KEY=${CHANGEDETECTION_API_KEY}
       - BASE_URL=http://localhost:5000
+      - LANG=en_US.UTF-8
+      - LANGUAGE=en_US:en
+      - LC_ALL=en_US.UTF-8
     restart: unless-stopped
     networks:
       - appnet

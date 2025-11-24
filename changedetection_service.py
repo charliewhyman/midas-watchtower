@@ -40,14 +40,14 @@ class ChangedetectionService:
         """
         logger.info(f"⏳ Waiting for changedetection.io to be ready (timeout: {timeout}s)...")
         
-        start_time = time.time()
+        start_time = time.monotonic()
         last_log_time = start_time
         
         # Determine which endpoint to check
         check_url = f"{self.base_url}/api/v1/watch" if check_api else self.base_url
         headers = self.headers if check_api else {}
         
-        while time.time() - start_time < timeout:
+        while time.monotonic() - start_time < timeout:
             try:
                 response = requests.get(check_url, headers=headers, timeout=5)
                 # Accept 200 or 401 (unauthorized) as "service is up"
@@ -56,7 +56,7 @@ class ChangedetectionService:
                     return True
             except requests.exceptions.ConnectionError:
                 # Normal during startup - log every 20 seconds
-                current_time = time.time()
+                current_time = time.monotonic()
                 if current_time - last_log_time > 20:
                     elapsed = int(current_time - start_time)
                     logger.info(f"⏳ Waiting for changedetection.io... ({elapsed}s/{timeout}s)")

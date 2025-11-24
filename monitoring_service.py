@@ -158,12 +158,12 @@ class MonitoringService:
         """Wait for changedetection.io to be fully ready with comprehensive diagnostics"""
         logger.info(f"Waiting for changedetection.io to be ready (timeout: {timeout}s)...")
         
-        start_time = time.time()
+        start_time = time.monotonic()
         attempt = 0
         
-        while time.time() - start_time < timeout:
+        while time.monotonic() - start_time < timeout:
             attempt += 1
-            elapsed = int(time.time() - start_time)
+            elapsed = int(time.monotonic() - start_time)
             
             try:
                 # Test basic connectivity first
@@ -195,7 +195,7 @@ class MonitoringService:
             
             # Progressive backoff
             sleep_time = min(2 ** min(attempt, 5), 10)  # Exponential backoff, max 10s
-            if time.time() + sleep_time - start_time > timeout:
+            if time.monotonic() + sleep_time - start_time > timeout:
                 break  # Don't sleep if it would exceed timeout
             time.sleep(sleep_time)
         

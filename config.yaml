@@ -1,27 +1,190 @@
 monitored_urls:
-  - url: "https://openai.com/safety"
-    check_interval: 3600
-    type: "policy"
-    priority: "high"
-  
-  - url: "https://deepmind.com/safety"
-    check_interval: 3600
-    type: "policy"
-    priority: "high"
-  
-  - url: "https://anthropic.com/research"
+  # OpenAI URLs (en-US)
+
+  - url: "https://openai.com/en-US/policies/usage-policies/"
     check_interval: 7200
-    type: "research"
+    type: "usage policy"
     priority: "medium"
 
+  - url: "https://openai.com/safety"
+    check_interval: 3600
+    type: "safety policy"
+    priority: "high"
+
+  - url: "https://openai.com/policies/"
+    check_interval: 3600
+    type: "policy overview"
+    priority: "high"
+
+  - url: "https://openai.com/en-US/policies/how-chatgpt-and-our-foundation-models-are-developed/"
+    check_interval: 3600
+    type: "development policy"
+    priority: "medium"
+
+  - url: "https://openai.com/policies/sharing-publication-policy/"
+    check_interval: 3600
+    type: "sharing policy"
+    priority: "medium"
+
+  - url: "https://openai.com/policies/outbound-coordinated-disclosure-policy/"
+    check_interval: 3600
+    type: "security policy"
+    priority: "medium"
+
+  - url: "https://openai.com/policies/coordinated-vulnerability-disclosure-policy/"
+    check_interval: 3600
+    type: "vulnerability policy"
+    priority: "medium"
+
+  - url: "https://openai.com/policies/using-chatgpt-agent-in-line-with-our-policies/"
+    check_interval: 3600
+    type: "agent use policy"
+    priority: "medium"
+
+  # OpenAI URLs (en-GB)
+  - url: "https://openai.com/en-GB/policies/creating-sora-videos-in-line-with-our-policies/"
+    check_interval: 3600
+    type: "video policy"
+    priority: "medium"
+
+  - url: "https://openai.com/policies/services-agreement/"
+    check_interval: 3600
+    type: "services agreement"
+    priority: "high"
+
+  - url: "https://openai.com/en-GB/policies/data-processing-addendum/"
+    check_interval: 3600
+    type: "data policy"
+    priority: "high"
+
+  - url: "https://openai.com/en-GB/policies/service-terms/"
+    check_interval: 3600
+    type: "terms of service"
+    priority: "high"
+
+  - url: "https://openai.com/en-GB/policies/privacy-policy/"
+    check_interval: 3600
+    type: "privacy policy"
+    priority: "high"
+
+  - url: "https://openai.com/en-GB/policies/terms-of-use/"
+    check_interval: 3600
+    type: "terms of use"
+    priority: "high"
+
+  # xAI URLs
+  - url: "https://x.ai/safety"
+    check_interval: 7200
+    type: "safety policy"
+    priority: "medium"
+  
+  # DeepSeek URLs
+  - url: "https://cdn.deepseek.com/policies/en-US/deepseek-privacy-policy.html"
+    check_interval: 7200
+    type: "privacy policy"
+    priority: "medium"
+
+  - url: "https://cdn.deepseek.com/policies/en-US/model-algorithm-disclosure.html"
+    check_interval: 14400
+    type: "documentation"
+    priority: "low"
+
+  - url: "https://cdn.deepseek.com/policies/en-US/deepseek-terms-of-use.html"
+    check_interval: 10800
+    type: "terms of service"
+    priority: "medium"
+
+  # Anthropic URLs
+  - url: "https://www.anthropic.com/rsp-updates"
+    check_interval: 14400
+    type: "safety policy"
+    priority: "medium"
+
+  - url: "https://www.anthropic.com/transparency"
+    check_interval: 10800
+    type: "transparency"
+    priority: "low"
+
+  - url: "https://trust.anthropic.com"
+    check_interval: 21600
+    type: "documentation"
+    priority: "low"
+
+# Microsoft URLs
   - url: "https://www.microsoft.com/en-us/research/project/ai-safety/"
     check_interval: 10800
     type: "research"
     priority: "medium"
 
+  - url: "https://www.microsoft.com/en-us/microsoft-copilot/for-individuals/termsofuse"
+    check_interval: 3600
+    type: "terms of use"
+    priority: "high"
+
+  - url: "https://www.microsoft.com/en-ca/servicesagreement/"
+    check_interval: 3600
+    type: "privacy policy"
+    priority: "high"
+
+  - url: "https://github.com/customer-terms/github-copilot-product-specific-terms"
+    check_interval: 7200
+    type: "copyright policy"
+    priority: "medium"
+
+  - url: "https://www.microsoft.com/en-us/ai/principles-and-approach"
+    check_interval: 14400
+    type: "safety principles"
+    priority: "low"
+  
+  - url: "https://cdn-dynmedia-1.microsoft.com/is/content/microsoftcorp/microsoft/final/en-us/microsoft-brand/documents/Microsoft-Responsible-AI-Standard-General-Requirements.pdf"
+    check_interval: 10800
+    type: "intellectual property"
+    priority: "medium"
+
+  - url: "https://www.microsoft.com/en-us/ai/responsible-ai"
+    check_interval: 14400
+    type: "responsible AI"
+    priority: "low"
+
+# Google URLs
   - url: "https://safety.google/ai/"
     check_interval: 3600
     type: "policy"
+    priority: "high"
+
+  - url: "https://gemini.google/policy-guidelines/"
+    check_interval: 7200
+    type: "policy"
+    priority: "medium"
+
+  - url: "https://safety.google/intl/en-US_ALL/products/gemini/"
+    check_interval: 10800
+    type: "safety overview"
+    priority: "medium"
+
+  - url: "https://ai.google.dev/gemini-api/docs/safety-settings"
+    check_interval: 14400
+    type: "API safety settings"
+    priority: "low"
+
+  - url: "https://ai.google.dev/gemini-api/docs/safety-guidance"
+    check_interval: 14400
+    type: "safety guidance"
+    priority: "low"
+
+  - url: "https://ai.google/safety/"
+    check_interval: 14400
+    type: "safety policy"
+    priority: "low"
+
+  - url: "https://safety.google/intl/en-GB_ALL/safety/saif/"
+    check_interval: 3600
+    type: "safety framework"
+    priority: "high"
+
+  - url: "https://ai.google/principles/"
+    check_interval: 3600
+    type: "principles"
     priority: "high"
 
 scheduling:

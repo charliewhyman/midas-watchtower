@@ -215,3 +215,6 @@ logs/
 *.log
 logs/
 *.json
+
+# uv
+.python-version

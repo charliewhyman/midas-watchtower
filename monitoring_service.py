@@ -147,7 +147,7 @@ class MonitoringService:
     
     def _wait_for_changedetection(self, timeout: int = 120) -> bool:
         """Wait for changedetection.io to be fully ready with comprehensive diagnostics"""
-        logger.info(f"⏳ Waiting for changedetection.io to be ready (timeout: {timeout}s)...")
+        logger.info(f"Waiting for changedetection.io to be ready (timeout: {timeout}s)...")
         
         start_time = time.time()
         attempt = 0
@@ -168,7 +168,7 @@ class MonitoringService:
                     # Verify we get meaningful data back
                     data = response.json()
                     if 'version' in data:
-                        logger.info(f"✅ changedetection.io ready after {attempt} attempts, version: {data.get('version')}")
+                        logger.info(f"changedetection.io ready after {attempt} attempts, version: {data.get('version')}")
                         return True
                     else:
                         logger.warning(f"⚠️ Service responding but invalid response: {data}")
@@ -182,7 +182,7 @@ class MonitoringService:
             except requests.exceptions.RequestException as e:
                 logger.warning(f"🌐 Request exception (attempt {attempt}, {elapsed}s): {e}")
             except Exception as e:
-                logger.warning(f"❌ Unexpected error (attempt {attempt}, {elapsed}s): {e}")
+                logger.warning(f"Unexpected error (attempt {attempt}, {elapsed}s): {e}")
             
             # Progressive backoff
             sleep_time = min(2 ** min(attempt, 5), 10)  # Exponential backoff, max 10s
@@ -190,30 +190,101 @@ class MonitoringService:
                 break  # Don't sleep if it would exceed timeout
             time.sleep(sleep_time)
         
-        logger.error(f"❌ changedetection.io not ready after {timeout} seconds and {attempt} attempts")
+        logger.error(f"changedetection.io not ready after {timeout} seconds and {attempt} attempts")
         return False
     
+    def _sync_watches_with_config(self, max_retries: int, retry_delay: int):
+        """Ensure changedetection watches match config.yaml (create missing ones)"""
+        for attempt in range(max_retries):
+            try:
+                logger.info(f"Attempt {attempt + 1}/{max_retries}: Syncing changedetection.io watches with config.yaml...")
+                
+                # Get existing watches from changedetection.io
+                existing_watches = self.changedetection_service.get_existing_watches()
+                
+                if existing_watches is None:
+                    logger.error("Failed to retrieve existing watches (auth error)")
+                    raise Exception("Authentication failed")
+                
+                existing_urls = {watch.get('url') for watch in existing_watches.values() if watch.get('url')}
+                
+                logger.info(f"📊 Found {len(existing_urls)} existing watches in changedetection.io")
+                if existing_urls:
+                    logger.info(f"📋 Existing watches:")
+                    for url in sorted(existing_urls):
+                        logger.info(f"   - {url}")
+                
+                # Get URLs from config.yaml
+                config_urls = {url_config.url for url_config in self.config.url_configs}
+                logger.info(f"📊 Found {len(config_urls)} URLs in config.yaml")
+                if config_urls:
+                    logger.info(f"📋 Config URLs:")
+                    for url in sorted(config_urls):
+                        logger.info(f"   - {url}")
+                
+                # Find missing URLs that need to be added
+                missing_urls = config_urls - existing_urls
+                
+                if missing_urls:
+                    logger.info(f"📝 Found {len(missing_urls)} URLs from config.yaml not in changedetection.io")
+                    logger.info(f"🔧 Creating missing watches:")
+                    for url in sorted(missing_urls):
+                        logger.info(f"   - {url}")
+                    
+                    # Create watches for missing URLs using the public method
+                    created_count = 0
+                    failed_count = 0
+                    
+                    for url_config in self.config.url_configs:
+                        if url_config.url in missing_urls:
+                            logger.info(f"➕ Creating watch for: {url_config.url}")
+                            success = self.changedetection_service.create_watch(url_config, self.change_detector)
+                            
+                            if success:
+                                created_count += 1
+                                logger.info(f"✅ Successfully created watch for {url_config.url}")
+                            else:
+                                failed_count += 1
+                                logger.error(f"❌ Failed to create watch for {url_config.url}")
+                    
+                    logger.info(f"✅ Watch creation summary: {created_count} succeeded, {failed_count} failed")
+                    
+                    if failed_count > 0 and created_count == 0:
+                        raise Exception(f"Failed to create any watches ({failed_count} failures)")
+                        
+                else:
+                    logger.info(f"✅ All {len(config_urls)} config URLs already exist in changedetection.io")
+                    logger.info(f"🎯 No new watches needed - system is in sync!")
+                
+                return
+                
+            except Exception as e:
+                logger.warning(f"❌ Attempt {attempt + 1} failed: {e}")
+                logger.exception("Full traceback:")
+                if attempt < max_retries - 1:
+                    logger.info(f"⏳ Retrying in {retry_delay} seconds...")
+                    time.sleep(retry_delay)
+                else:
+                    logger.error("💥 All attempts to sync changedetection.io watches failed")
+                    logger.error("💡 Check the logs above for specific errors")
+                
     def _setup_changedetection_with_retry(self, max_retries: int = 3, retry_delay: int = 15):
         """Setup changedetection.io watches with robust retry logic"""
-        logger.info("🔧 Setting up changedetection.io integration...")
+        logger.info("Setting up changedetection.io integration...")
         
         # First, check basic container connectivity
         if not self._check_container_connectivity():
-            logger.error("❌ Basic container connectivity failed - cannot setup changedetection.io")
+            logger.error("Basic container connectivity failed - cannot setup changedetection.io")
             return
         
         # Wait for changedetection to be fully ready
         if not self._wait_for_changedetection(timeout=120):
-            logger.error("❌ Changedetection.io never became ready, skipping watch setup")
+            logger.error("Changedetection.io never became ready, skipping watch setup")
             return
         
-        # Only setup watches on first run or if no watches exist
-        if self.first_run:
-            logger.info("🆕 First run - setting up initial changedetection.io watches")
-            self._setup_initial_watches_with_retry(max_retries, retry_delay)
-        else:
-            logger.info("🔄 Continuing run - checking existing changedetection.io watches")
-            self._verify_existing_watches()
+        # Always sync watches from config, not just on first run
+        logger.info("🔄 Syncing changedetection.io watches from config.yaml")
+        self._sync_watches_with_config(max_retries, retry_delay)
     
     def _setup_initial_watches_with_retry(self, max_retries: int, retry_delay: int):
         """Setup initial watches with retry logic for first run"""
@@ -221,13 +292,13 @@ class MonitoringService:
             try:
                 logger.info(f"🔄 Attempt {attempt + 1}/{max_retries}: Setting up initial changedetection.io watches...")
                 self.changedetection_service.setup_watches(self.change_detector)
-                logger.info("✅ Initial changedetection.io watches setup completed successfully")
+                logger.info("Initial changedetection.io watches setup completed successfully")
                 return
                 
             except Exception as e:
-                logger.warning(f"❌ Attempt {attempt + 1} failed: {e}")
+                logger.warning(f"Attempt {attempt + 1} failed: {e}")
                 if attempt < max_retries - 1:
-                    logger.info(f"⏳ Retrying in {retry_delay} seconds...")
+                    logger.info(f"Retrying in {retry_delay} seconds...")
                     time.sleep(retry_delay)
                     
                     # Restart changedetection service between attempts if possible
@@ -256,7 +327,7 @@ class MonitoringService:
             # Check if we can access the watches API
             watches = self.changedetection_service.get_existing_watches()
             if watches:
-                logger.info(f"✅ Found {len(watches)} existing watches in changedetection.io")
+                logger.info(f"Found {len(watches)} existing watches in changedetection.io")
                 
                 # Test that at least one watch is accessible
                 if watches:
@@ -264,7 +335,7 @@ class MonitoringService:
                     try:
                         watch_data = self.changedetection_service.get_watch(first_watch_uuid)
                         if watch_data:
-                            logger.info(f"✅ Successfully accessed watch {first_watch_uuid}")
+                            logger.info(f"Successfully accessed watch {first_watch_uuid}")
                         else:
                             logger.warning(f"⚠️ Could not access watch data for {first_watch_uuid}")
                     except Exception as e:
@@ -335,7 +406,7 @@ class MonitoringService:
             return stats
             
         except Exception as e:
-            logger.error(f"❌ Monitoring cycle failed with error: {e}")
+            logger.error(f"Monitoring cycle failed with error: {e}")
             logger.exception("Full traceback:")
             stats.errors += 1
             stats.end_time = datetime.now()
@@ -450,7 +521,7 @@ class MonitoringService:
         if self.first_run:
             logger.info("🎉 FIRST RUN COMPLETED SUCCESSFULLY!")
         else:
-            logger.info("✅ MONITORING CYCLE COMPLETED!")
+            logger.info("MONITORING CYCLE COMPLETED!")
         logger.info("=" * 60)
         logger.info(f"Cycle ID: {stats.cycle_id}")
         logger.info(f"Run Type: {'First Run 🆕' if self.first_run else 'Continuing Run 🔄'}")

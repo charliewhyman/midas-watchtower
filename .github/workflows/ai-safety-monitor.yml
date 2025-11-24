@@ -31,13 +31,13 @@ jobs:
 
       - name: Debug workspace structure
         run: |
-          echo "📁 Current directory structure:"
+          echo " Current directory structure:"
           ls -la
           echo ""
-          echo "📁 .github directory structure:"
+          echo " .github directory structure:"
           ls -la .github/ || echo "No .github directory"
           echo ""
-          echo "📁 Scripts directory structure:"
+          echo " Scripts directory structure:"
           ls -la .github/scripts/ || echo "No scripts directory"
 
       - name: Cache monitoring data
@@ -54,59 +54,59 @@ jobs:
       - name: Check cache result and set first run flag
         id: check-first-run
         run: |
-          echo "🔍 Cache result: ${{ steps.data-cache.outputs.cache-hit }}"
+          echo " Cache result: ${{ steps.data-cache.outputs.cache-hit }}"
           
           if [[ "${{ steps.data-cache.outputs.cache-hit }}" == 'true' ]]; then
-            echo "✅ Cache hit - continuing from previous data"
+            echo " Cache hit - continuing from previous data"
             echo "FIRST_RUN=false" >> $GITHUB_ENV
             echo "first_run=false" >> $GITHUB_OUTPUT
             
             # Verify the cached data exists
-            echo "📁 Cached data contents:"
+            echo " Cached data contents:"
             find data/ -type f -name "*" 2>/dev/null | head -10 || echo "No cached files found"
           else
-            echo "🆕 Cache miss - first run detected"
+            echo " Cache miss - first run detected"
             echo "FIRST_RUN=true" >> $GITHUB_ENV
             echo "first_run=true" >> $GITHUB_OUTPUT
             
             # Initialize data directories
             mkdir -p data/datastore data/reports
-            echo "📁 Initialized empty data directories"
+            echo " Initialized empty data directories"
           fi
 
       - name: Restore data permissions and structure
         run: |
-          echo "🔧 Setting up data directories..."
+          echo " Setting up data directories..."
           mkdir -p data/datastore data/reports data/logs
           chmod -R 777 data/ || true
           
-          echo "📊 Existing data content:"
+          echo " Existing data content:"
           find data/ -type f -name "*.json" | head -10 || echo "No existing data files"
           echo "Datastore files:"
           ls -la data/datastore/ 2>/dev/null || echo "No datastore files yet"
 
       - name: Verify prerequisites and scripts
         run: |
-          echo "🔧 Checking prerequisites..."
-          command -v docker && echo "✅ docker found: $(docker --version)" || (echo "❌ docker not found"; exit 1)
+          echo " Checking prerequisites..."
+          command -v docker && echo " docker found: $(docker --version)" || (echo " docker not found"; exit 1)
           
           # Check for docker compose (plugin) or docker-compose (standalone)
           if docker compose version >/dev/null 2>&1; then
-            echo "✅ docker compose (plugin) found: $(docker compose version | head -1)"
+            echo " docker compose (plugin) found: $(docker compose version | head -1)"
             echo "DOCKER_COMPOSE_CMD=docker compose" >> $GITHUB_ENV
           elif command -v docker-compose >/dev/null 2>&1; then
-            echo "✅ docker-compose (standalone) found: $(docker-compose --version)"
+            echo " docker-compose (standalone) found: $(docker-compose --version)"
             echo "DOCKER_COMPOSE_CMD=docker-compose" >> $GITHUB_ENV
           else
-            echo "❌ Neither docker compose nor docker-compose found"
+            echo " Neither docker compose nor docker-compose found"
             exit 1
           fi
           
-          command -v curl && echo "✅ curl found: $(curl --version | head -1)" || (echo "❌ curl not found"; exit 1)
-          command -v jq && echo "✅ jq found: $(jq --version)" || (echo "❌ jq not found"; exit 1)
+          command -v curl && echo " curl found: $(curl --version | head -1)" || (echo " curl not found"; exit 1)
+          command -v jq && echo " jq found: $(jq --version)" || (echo " jq not found"; exit 1)
           
           echo ""
-          echo "📜 Checking required scripts..."
+          echo " Checking required scripts..."
           required_scripts=(
             ".github/scripts/config.sh"
             ".github/scripts/logger.sh"
@@ -116,14 +116,14 @@ jobs:
           
           for script in "${required_scripts[@]}"; do
             if [ ! -f "$script" ]; then
-              echo "❌ Required script not found: $script"
+              echo " Required script not found: $script"
               exit 1
             fi
             chmod +x "$script"
-            echo "✅ $script is executable"
+            echo " $script is executable"
           done
           
-          echo "✅ All prerequisites and scripts available"
+          echo " All prerequisites and scripts available"
 
       - name: Setup environment
         run: |
@@ -150,7 +150,7 @@ jobs:
             echo "REPORT_DIR=$REPORT_DIR"
           } >> $GITHUB_ENV
           
-          echo "✅ Environment configured"
+          echo " Environment configured"
           echo "Service URL: $CHANGEDETECTION_URL"
           echo "Docker Compose Command: $DOCKER_COMPOSE_CMD"
 
@@ -187,7 +187,7 @@ jobs:
 
       - name: Verify cache status
         run: |
-          echo "🔍 Cache Status:"
+          echo " Cache Status:"
           echo "Python cache hit: ${{ steps.pip-cache.outputs.cache-hit }}"
           echo "Docker cache hit: ${{ steps.docker-cache.outputs.cache-hit }}"
           echo "Data cache hit: ${{ steps.data-cache.outputs.cache-hit }}"
@@ -195,7 +195,7 @@ jobs:
           if [[ "${{ steps.docker-cache.outputs.cache-hit }}" != 'true' ]]; then
             echo "Docker cache miss - this is normal for first run or when files change"
           else
-            echo "✅ Docker cache hit - layers will be reused"
+            echo " Docker cache hit - layers will be reused"
           fi
 
       - name: Build and start services
@@ -350,7 +350,7 @@ jobs:
 
       - name: Verify data for caching
         run: |
-          echo "📊 Data to be cached for next run:"
+          echo " Data to be cached for next run:"
           echo "Datastore contents:"
           ls -la data/datastore/ 2>/dev/null || echo "No datastore files"
           echo "Reports contents:"
@@ -358,9 +358,9 @@ jobs:
           
           if [ -f "data/datastore/changedetection.db" ]; then
             db_size=$(wc -c < "data/datastore/changedetection.db")
-            echo "✅ changedetection.db ready for cache: $db_size bytes"
+            echo " changedetection.db ready for cache: $db_size bytes"
           else
-            echo "⚠️ changedetection.db not found - nothing to cache"
+            echo "️ changedetection.db not found - nothing to cache"
           fi
 
       - name: Save service logs
@@ -443,7 +443,7 @@ jobs:
           $DOCKER_COMPOSE_CMD -p "$DOCKER_COMPOSE_PROJECT" down --remove-orphans --timeout 30 || true
           
           # Show what data we're preserving for cache
-          echo "📁 Data preserved for next run cache:"
+          echo " Data preserved for next run cache:"
           find data/ -type f -name "*.db" -o -name "*.json" | head -10 || echo "No data files to preserve"
           
           log_success "Cleanup completed with data preservation"
@@ -465,20 +465,20 @@ jobs:
             echo ""
             echo "**Artifacts:**"
             if [ "${{ job.status }}" = "success" ]; then
-              echo "- ✅ Monitoring reports"
-              echo "- ✅ Service logs"
-              echo "- ✅ Data cached for next run"
+              echo "-  Monitoring reports"
+              echo "-  Service logs"
+              echo "-  Data cached for next run"
             else
-              echo "- ❌ Monitoring reports (may be incomplete)"
-              echo "- 📋 Service logs"
-              echo "- 📋 Data cached for next run"
-              echo "- 🔍 Failure diagnostics"
+              echo "-  Monitoring reports (may be incomplete)"
+              echo "-  Service logs"
+              echo "-  Data cached for next run"
+              echo "-  Failure diagnostics"
             fi
             echo ""
             echo "**Data Persistence:**"
             if [ "${{ steps.check-first-run.outputs.first_run }}" = "true" ]; then
-              echo "- 🆕 First run - initializing datastore"
+              echo "-  First run - initializing datastore"
             else
-              echo "- 🔄 Continuing from cached data"
+              echo "-  Continuing from cached data"
             fi
           } >> $GITHUB_STEP_SUMMARY

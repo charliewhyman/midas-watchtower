@@ -273,3 +273,20 @@ class ChangedetectionService:
                 logger.error(f"Error parsing dates for {url}: {e}")
         
         return None
+    
+    def get_existing_watches(self) -> Dict[str, Dict[str, Any]]:
+        """Public method to get existing watches"""
+        return self._get_existing_watches()
+
+    def create_watch(self, url_config, change_detector: 'ChangeDetector') -> bool:
+        """Public method to create a new watch"""
+        try:
+            self._create_new_watch(
+                url=url_config.url,
+                check_interval=url_config.check_interval,
+                change_detector=change_detector
+            )
+            return True
+        except Exception as e:
+            logger.error(f"Failed to create watch for {url_config.url}: {e}")
+            return False

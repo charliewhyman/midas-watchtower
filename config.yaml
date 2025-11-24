@@ -111,10 +111,6 @@ monitored_urls:
   - url: "https://www.microsoft.com/en-us/ai/principles-and-approach"
     type: "safety principles"
     priority: "low"
-  
-  - url: "https://cdn-dynmedia-1.microsoft.com/is/content/microsoftcorp/microsoft/final/en-us/microsoft-brand/documents/Microsoft-Responsible-AI-Standard-General-Requirements.pdf"
-    type: "intellectual property"
-    priority: "medium"
 
   - url: "https://www.microsoft.com/en-us/ai/responsible-ai"
     type: "responsible AI"

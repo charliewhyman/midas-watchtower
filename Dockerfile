@@ -11,7 +11,6 @@ RUN apt-get update && apt-get install -y \
 # ---- dependencies ----
 # Copy project metadata and lockfile (copy requirements.txt only if provided by workflow)
 COPY pyproject.toml uv.lock* requirements.txt* /app/
-WORKDIR /app
 
 RUN python -m pip install --upgrade pip && \
     if [ -f uv.lock ]; then \

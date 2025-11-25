@@ -225,15 +225,7 @@ jobs:
           # Get the image name built by docker-compose (format: {project}-{service})
           IMAGE_NAME="${DOCKER_COMPOSE_PROJECT}-metadata-monitor"
           echo "Verifying bs4 in image: $IMAGE_NAME"
-          docker run --rm "$IMAGE_NAME" python -<<'PY'
-          import importlib, sys
-          try:
-              importlib.import_module('bs4')
-              print('bs4 import OK')
-          except Exception as e:
-              print('bs4 import FAILED:', e)
-              sys.exit(1)
-          PY
+          docker run --rm "$IMAGE_NAME" python -c "import bs4; print('bs4 import OK')"
 
       - name: Wait for basic connectivity
         run: |

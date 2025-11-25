@@ -169,7 +169,7 @@ jobs:
             /tmp/pip-cache
             **/__pycache__
             **/.pytest_cache
-          key: ${{ runner.os }}-python-${{ hashFiles('**/requirements.txt') }}
+          key: ${{ runner.os }}-python-${{ hashFiles('uv.lock') }}
           restore-keys: |
             ${{ runner.os }}-python-
 
@@ -181,7 +181,7 @@ jobs:
             ~/.cache/docker
             /tmp/.buildx-cache
             /var/lib/docker
-          key: ${{ runner.os }}-docker-${{ hashFiles('docker-compose.yml', 'Dockerfile', 'requirements.txt') }}
+          key: ${{ runner.os }}-docker-${{ hashFiles('docker-compose.yaml', 'Dockerfile', 'uv.lock') }}
           restore-keys: |
             ${{ runner.os }}-docker-
 
@@ -198,6 +198,16 @@ jobs:
             echo " Docker cache hit - layers will be reused"
           fi
 
+      - name: Export uv.lock to requirements.txt
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          pip install uv
+          # Export a pip-compatible requirements.txt from uv.lock
+          uv export -f requirements > requirements.txt
+          echo "Exported requirements.txt (head):"
+          head -n 50 requirements.txt || true
+
       - name: Build and start services
         run: |
           source .github/scripts/logger.sh
@@ -209,6 +219,19 @@ jobs:
           $DOCKER_COMPOSE_CMD -p $DOCKER_COMPOSE_PROJECT up -d changedetection playwright-chrome
           
           log_success "Services started successfully"
+
+      - name: Verify bs4 is installed in metadata-monitor image
+        run: |
+          # Wait for the image name that docker-compose builds; adjust tag if necessary
+          docker run --rm metadata-monitor:latest python -<<'PY'
+          import importlib, sys
+          try:
+              importlib.import_module('bs4')
+              print('bs4 import OK')
+          except Exception as e:
+              print('bs4 import FAILED:', e)
+              sys.exit(1)
+          PY
 
       - name: Wait for basic connectivity
         run: |

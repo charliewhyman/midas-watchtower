@@ -16,7 +16,7 @@ WORKDIR /app
 RUN python -m pip install --upgrade pip && \
     if [ -f uv.lock ]; then \
       pip install uv && \
-      uv export -f requirements > /tmp/requirements.txt && \
+      uv export --format requirements-txt > /tmp/requirements.txt && \
       pip install --no-cache-dir -r /tmp/requirements.txt ; \
     elif [ -f requirements.txt ]; then \
       pip install --no-cache-dir -r requirements.txt ; \

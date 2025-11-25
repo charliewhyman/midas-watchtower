@@ -204,7 +204,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install uv
           # Export a pip-compatible requirements.txt from uv.lock
-          uv export -f requirements > requirements.txt
+          uv export --format requirements-txt > requirements.txt
           echo "Exported requirements.txt (head):"
           head -n 50 requirements.txt || true
 
@@ -222,8 +222,10 @@ jobs:
 
       - name: Verify bs4 is installed in metadata-monitor image
         run: |
-          # Wait for the image name that docker-compose builds; adjust tag if necessary
-          docker run --rm metadata-monitor:latest python -<<'PY'
+          # Get the image name built by docker-compose (format: {project}-{service})
+          IMAGE_NAME="${DOCKER_COMPOSE_PROJECT}-metadata-monitor"
+          echo "Verifying bs4 in image: $IMAGE_NAME"
+          docker run --rm "$IMAGE_NAME" python -<<'PY'
           import importlib, sys
           try:
               importlib.import_module('bs4')

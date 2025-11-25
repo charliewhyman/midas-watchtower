@@ -8,11 +8,22 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/* \
     && apt-get clean
 
-# Copy only requirements first for better layer caching
-COPY requirements.txt .
+# ---- dependencies ----
+# Copy dependency files first for better layer caching
+COPY pyproject.toml uv.lock* requirements.txt* ./
 
-# Install Python dependencies with cache dir
-RUN pip install --cache-dir /tmp/pip-cache -r requirements.txt
+# Install Python dependencies with uv.lock support
+RUN python -m pip install --upgrade pip && \
+    if [ -f uv.lock ]; then \
+      pip install uv && \
+      uv export --format requirements-txt > /tmp/requirements.txt && \
+      pip install --no-cache-dir -r /tmp/requirements.txt; \
+    elif [ -f requirements.txt ]; then \
+      pip install --no-cache-dir -r requirements.txt; \
+    else \
+      echo "No dependency manifest found (uv.lock or requirements.txt)" && exit 1; \
+    fi
+# ---- end dependencies ----
 
 # Copy application code
 COPY . .

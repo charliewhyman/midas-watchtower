@@ -185,7 +185,8 @@ jobs:
           path: |
 
             /tmp/.buildx-cache
-            /var/lib/docker
+            ~/.cache/docker
+            # Note: do NOT attempt to cache /var/lib/docker on hosted runners (permission denied)
           key: ${{ runner.os }}-docker-${{ hashFiles('docker-compose.yml', 'Dockerfile', 'requirements.txt') }}
           restore-keys: |
             ${{ runner.os }}-docker-

@@ -53,8 +53,7 @@ jobs:
         with:
           path: |
             data/
-            # Ensure the URL history file is included explicitly when present
-            data/url_history.json
+
           # Use a stable key per branch/ref so cache is reusable across runs on the same branch
           key: monitoring-data-${{ github.ref }}-v1
           restore-keys: |
@@ -191,7 +190,7 @@ jobs:
         with:
           path: |
 
-            /tmp/.buildx-cache
+
             ~/.cache/docker
             # Note: do NOT attempt to cache /var/lib/docker on hosted runners (permission denied)
           key: ${{ runner.os }}-docker-${{ hashFiles('docker-compose.yml', 'Dockerfile', 'requirements.txt') }}
@@ -270,7 +269,6 @@ jobs:
           chmod -R 755 "$REPORT_DIR" "$LOG_DIR" "$DOCKER_LOG_DIR" "data" || true
           chmod -R 777 "$REPORT_DIR" "$LOG_DIR" "$DOCKER_LOG_DIR" "data" || true
 
-          log_success "Directories prepared"
 
       - name: Initialize on first run
         if: steps.check-first-run.outputs.first_run == 'true'
@@ -327,7 +325,7 @@ jobs:
           mkdir -p "$LOG_DIR" "$REPORT_DIR" "data/datastore" "data/reports"
           chmod -R 777 "$LOG_DIR" "$REPORT_DIR" "data"
           
-          # Run monitoring with retry logic
+          chmod -R 775 "$LOG_DIR" "$REPORT_DIR" "data"
           for attempt in $(seq 1 "$MAX_MONITOR_ATTEMPTS"); do
             log_info "Monitoring Attempt $attempt/$MAX_MONITOR_ATTEMPTS"
             

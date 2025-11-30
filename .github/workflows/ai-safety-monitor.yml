@@ -253,9 +253,14 @@ jobs:
         run: |
           source .github/scripts/logger.sh
           
-          chmod -R 755 "$REPORT_DIR" "$LOG_DIR" "$DOCKER_LOG_DIR" "data"
+          # Ensure directories exist before changing permissions to avoid failures
           mkdir -p "$REPORT_DIR" "$LOG_DIR" "$DOCKER_LOG_DIR" "data/datastore" "data/reports"
-          chmod -R 777 "$REPORT_DIR" "$LOG_DIR" "$DOCKER_LOG_DIR" "data"
+
+          # Make permission changes resilient: should succeed now that dirs exist,
+          # but use || true to avoid failing the whole workflow on unexpected errors.
+          chmod -R 755 "$REPORT_DIR" "$LOG_DIR" "$DOCKER_LOG_DIR" "data" || true
+          chmod -R 777 "$REPORT_DIR" "$LOG_DIR" "$DOCKER_LOG_DIR" "data" || true
+
           log_success "Directories prepared"
 
       - name: Initialize on first run

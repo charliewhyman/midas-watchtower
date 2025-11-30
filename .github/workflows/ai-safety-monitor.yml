@@ -2,7 +2,7 @@ name: AI Safety Monitor
 
 on:
   schedule:
-    - cron: '0 */24 * * *'  # Run every day
+    - cron: '0 0 * * *'  # Run every day at 00:00 UTC
   workflow_dispatch:
     inputs:
       run_type:
@@ -151,6 +151,7 @@ jobs:
             echo "LOG_DIR=$LOG_DIR"
             echo "DOCKER_LOG_DIR=$DOCKER_LOG_DIR"
             echo "REPORT_DIR=$REPORT_DIR"
+            echo "SERVICE_STARTUP_DELAY=${SERVICE_STARTUP_DELAY:-$WAIT_INTERVAL}"
           } >> $GITHUB_ENV
           
           echo " Environment configured"
@@ -343,7 +344,9 @@ jobs:
                 
                 log_info "Restarting changedetection service..."
                 $DOCKER_COMPOSE_CMD -p "$DOCKER_COMPOSE_PROJECT" restart changedetection
-                sleep 10
+                # Wait for the service to become available. Use SERVICE_STARTUP_DELAY if provided,
+                # otherwise fall back to WAIT_INTERVAL or 10 seconds.
+                sleep "${SERVICE_STARTUP_DELAY:-${WAIT_INTERVAL:-10}}"
               else
                 log_failure "All monitoring attempts failed"
                 exit 1

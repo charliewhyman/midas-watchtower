@@ -171,6 +171,36 @@ jobs:
           driver: docker-container
           buildkitd-flags: --debug
 
+      - name: Restore cached service images
+        uses: actions/cache@v4
+        id: image-cache-restore
+        with:
+          path: |
+            docker-images/
+          key: docker-images-${{ runner.os }}-${{ hashFiles('docker-compose.yaml') }}
+          restore-keys: |
+            docker-images-
+
+      - name: Load cached images (if present)
+        run: |
+          set -e
+          mkdir -p docker-images
+          # Map expected images to files
+          declare -A imgs=(
+            [changedetection]=ghcr.io/dgtlmoon/changedetection.io:latest
+            [playwright-chrome]=browserless/chrome:latest
+          )
+
+          for key in "${!imgs[@]}"; do
+            tarfile="docker-images/${key}.tar"
+            if [ -f "$tarfile" ]; then
+              echo "Loading cached image for ${key} from $tarfile"
+              docker load -i "$tarfile" || echo "docker load failed for $tarfile"
+            else
+              echo "No cached tar for ${key}"
+            fi
+          done
+
       - name: Cache Python packages
         uses: actions/cache@v4
         id: pip-cache
@@ -221,6 +251,44 @@ jobs:
           $DOCKER_COMPOSE_CMD -p $DOCKER_COMPOSE_PROJECT up -d changedetection playwright-chrome
           
           log_success "Services started successfully"
+
+      - name: Save service images to cache
+        if: always()
+        run: |
+          set -e
+          mkdir -p docker-images
+
+          echo "Saving changedetection image..."
+          if docker image inspect ghcr.io/dgtlmoon/changedetection.io:latest >/dev/null 2>&1; then
+            docker save ghcr.io/dgtlmoon/changedetection.io:latest -o docker-images/changedetection.tar || true
+          else
+            echo "changedetection image not present locally, skipping save"
+          fi
+
+          echo "Saving playwright-chrome image..."
+          if docker image inspect browserless/chrome:latest >/dev/null 2>&1; then
+            docker save browserless/chrome:latest -o docker-images/playwright-chrome.tar || true
+          else
+            echo "playwright-chrome image not present locally, skipping save"
+          fi
+
+          echo "Saving local built image metadata-monitor..."
+          if docker image inspect metadata-monitor:latest >/dev/null 2>&1; then
+            docker save metadata-monitor:latest -o docker-images/metadata-monitor.tar || true
+          else
+            echo "metadata-monitor image not found (may have different tag), attempting to find by name"
+            docker images --format '{{.Repository}}:{{.Tag}}' | grep '^metadata-monitor:' || true
+          fi
+
+      - name: Cache saved service images
+        uses: actions/cache@v4
+        id: image-cache-save
+        with:
+          path: |
+            docker-images/
+          key: docker-images-${{ runner.os }}-${{ hashFiles('docker-compose.yaml') }}
+          restore-keys: |
+            docker-images-
 
       - name: Wait for basic connectivity
         run: |

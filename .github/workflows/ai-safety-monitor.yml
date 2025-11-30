@@ -2,7 +2,7 @@ name: AI Safety Monitor
 
 on:
   schedule:
-    - cron: '0 */6 * * *'  # Run every 6 hours
+    - cron: '0 */24 * * *'  # Run every day
   workflow_dispatch:
     inputs:
       run_type:

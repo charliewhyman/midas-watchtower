@@ -362,6 +362,18 @@ jobs:
 
       - name: Verify data for caching
         run: |
+          # Attempt to export changedetection datastore from the running container
+          echo "Attempting to copy changedetection datastore from container to host..."
+          CONTAINER_ID=$($DOCKER_COMPOSE_CMD -p "$DOCKER_COMPOSE_PROJECT" ps -q changedetection 2>/dev/null || true)
+          if [ -n "$CONTAINER_ID" ]; then
+            echo " Found changedetection container: $CONTAINER_ID"
+            mkdir -p data/datastore
+            docker cp "$CONTAINER_ID:/datastore/changedetection.db" data/datastore/ 2>/dev/null || echo " No changedetection.db in container or copy failed"
+            docker cp "$CONTAINER_ID:/datastore/url-watches.json" data/datastore/ 2>/dev/null || echo " No url-watches.json in container or copy failed"
+          else
+            echo " No running changedetection container found to copy datastore from"
+          fi
+
           echo " Data to be cached for next run:"
           echo "Datastore contents:"
           ls -la data/datastore/ 2>/dev/null || echo "No datastore files"

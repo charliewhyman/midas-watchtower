@@ -109,13 +109,16 @@ class MonitoringService:
                 logger.info(f"Found {len(report_files)} previous reports")
                 return False
         
-        # Check change detector history
+        # Check change detector history (support both legacy 'history' and current 'metadata_history')
         history_path = Path(self.config.settings.history_file)
         if history_path.exists():
             try:
                 with open(history_path, 'r', encoding='utf-8') as f:
                     history_data = json.load(f)
-                    if history_data and 'history' in history_data and history_data['history']:
+                    # Support legacy format that used 'history' key as well as the current 'metadata_history'
+                    has_legacy_history = bool(history_data and history_data.get('history'))
+                    has_metadata_history = bool(history_data and history_data.get('metadata_history'))
+                    if has_legacy_history or has_metadata_history:
                         logger.info("Found existing change history")
                         return False
             except (json.JSONDecodeError, Exception) as e:

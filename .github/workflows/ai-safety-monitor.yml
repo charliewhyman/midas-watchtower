@@ -47,7 +47,8 @@ jobs:
           path: |
             data/datastore/
             data/reports/
-          key: monitoring-data-${{ github.sha }}
+          # Use the run number so cache can persist across commits
+          key: monitoring-data-${{ github.run_number }}
           restore-keys: |
             monitoring-data-
 

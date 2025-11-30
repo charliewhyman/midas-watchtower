@@ -78,7 +78,9 @@ jobs:
         run: |
           echo " Setting up data directories..."
           mkdir -p data/datastore data/reports data/logs
-          chmod -R 777 data/ || true
+          # Set directories to 755 and files to 644 for better security
+          find data/ -type d -exec chmod 755 {} \; || true
+          find data/ -type f -exec chmod 644 {} \; || true
           
           echo " Existing data content:"
           find data/ -type f -name "*.json" | head -10 || echo "No existing data files"
@@ -178,7 +180,7 @@ jobs:
         id: docker-cache
         with:
           path: |
-            ~/.cache/docker
+
             /tmp/.buildx-cache
             /var/lib/docker
           key: ${{ runner.os }}-docker-${{ hashFiles('docker-compose.yml', 'Dockerfile', 'requirements.txt') }}
@@ -249,7 +251,7 @@ jobs:
         run: |
           source .github/scripts/logger.sh
           
-          log_info "Creating required directories..."
+          chmod -R 755 "$REPORT_DIR" "$LOG_DIR" "$DOCKER_LOG_DIR" "data"
           mkdir -p "$REPORT_DIR" "$LOG_DIR" "$DOCKER_LOG_DIR" "data/datastore" "data/reports"
           chmod -R 777 "$REPORT_DIR" "$LOG_DIR" "$DOCKER_LOG_DIR" "data"
           log_success "Directories prepared"
@@ -305,7 +307,7 @@ jobs:
           
           log_success "Health check passed"
           
-          # Ensure directories are writable
+          chmod -R 775 "$LOG_DIR" "$REPORT_DIR" "data"
           mkdir -p "$LOG_DIR" "$REPORT_DIR" "data/datastore" "data/reports"
           chmod -R 777 "$LOG_DIR" "$REPORT_DIR" "data"
           

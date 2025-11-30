@@ -45,10 +45,11 @@ jobs:
         id: data-cache
         with:
           path: |
-            data/datastore/
-            data/reports/
-          # Use the run number so cache can persist across commits
-          key: monitoring-data-${{ github.run_number }}
+            data/
+            # Ensure the URL history file is included explicitly when present
+            data/url_history.json
+          # Use a stable key per branch/ref so cache is reusable across runs on the same branch
+          key: monitoring-data-${{ github.ref }}-v1
           restore-keys: |
             monitoring-data-
 
@@ -366,6 +367,13 @@ jobs:
           ls -la data/datastore/ 2>/dev/null || echo "No datastore files"
           echo "Reports contents:"
           ls -la data/reports/ 2>/dev/null || echo "No report files"
+          echo "URL history file:"
+          if [ -f "data/url_history.json" ]; then
+            echo " data/url_history.json exists: $(wc -c < data/url_history.json) bytes"
+            head -n 40 data/url_history.json || true
+          else
+            echo " data/url_history.json not found"
+          fi
           
           if [ -f "data/datastore/changedetection.db" ]; then
             db_size=$(wc -c < "data/datastore/changedetection.db")

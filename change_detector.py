@@ -4,6 +4,7 @@ from typing import Dict, Any, List, Optional
 import json
 from pathlib import Path
 import re
+from urllib.parse import urlparse, urlunparse
 
 from models import UrlMetadata, HtmlMetadata, ChangeDetails, PolicyAlert
 import logging
@@ -80,7 +81,39 @@ class ChangeDetector:
     
     def _get_previous_metadata(self, url: str) -> Optional[Dict]:
         """Get previous metadata for a URL"""
-        return self.history.get('metadata_history', {}).get(url)
+        history = self.history.get('metadata_history', {})
+
+        # Direct match first
+        if url in history:
+            return history[url]
+
+        # Try normalized key lookup
+        norm_url = self._normalize_url(url)
+        if norm_url in history:
+            return history[norm_url]
+
+        # Try common variants (http/https) and without/with www
+        variants = self._generate_url_variants(url)
+        for v in variants:
+            if v in history:
+                return history[v]
+
+        # Fallback: try to match against stored final_url or canonical_url fields
+        for entry in history.values():
+            final = entry.get('final_url')
+            canonical = None
+            if entry.get('html_metadata'):
+                canonical = entry['html_metadata'].get('canonical_url')
+
+            try:
+                if final and (final == url or self._normalize_url(final) == norm_url):
+                    return entry
+                if canonical and (canonical == url or self._normalize_url(canonical) == norm_url):
+                    return entry
+            except Exception:
+                continue
+
+        return None
     
     def _save_current_metadata(self, url: str, metadata: UrlMetadata):
         """Save current metadata to history"""
@@ -118,7 +151,74 @@ class ChangeDetector:
                 'error': metadata.html_metadata.error,
             }
         
-        self.history['metadata_history'][url] = serializable_meta
+        # Use a normalized key to avoid duplicates due to minor URL form differences
+        key_source = metadata.final_url or metadata.url
+        try:
+            key = self._normalize_url(key_source)
+        except Exception:
+            key = url
+
+        self.history['metadata_history'][key] = serializable_meta
+
+    def _normalize_url(self, url: str) -> str:
+        """Normalize URLs for consistent history keys.
+
+        Normalization rules:
+        - Lowercase scheme and netloc
+        - Remove default ports (80, 443)
+        - Strip trailing slash
+        - Remove fragments
+        """
+        if not url:
+            return url
+
+        parsed = urlparse(url)
+        scheme = parsed.scheme.lower() if parsed.scheme else 'http'
+        netloc = parsed.netloc.lower()
+
+        # Remove default ports
+        if ':' in netloc:
+            host, port = netloc.rsplit(':', 1)
+            if (scheme == 'http' and port == '80') or (scheme == 'https' and port == '443'):
+                netloc = host
+
+        path = parsed.path or ''
+        # Strip trailing slash for normalization (but keep root '/')
+        if path != '/' and path.endswith('/'):
+            path = path[:-1]
+
+        normalized = urlunparse((scheme, netloc, path, '', '', ''))
+        return normalized
+
+    def _generate_url_variants(self, url: str) -> List[str]:
+        """Generate common URL variants to try when looking up history."""
+        variants = set()
+        try:
+            parsed = urlparse(url)
+            scheme = parsed.scheme or ''
+            netloc = parsed.netloc or parsed.path  # fallback if scheme missing
+            path = parsed.path if parsed.scheme else ''
+
+            # Base normalized
+            base = self._normalize_url(url)
+            variants.add(base)
+
+            # Add http/https versions
+            if scheme != 'http':
+                variants.add(self._normalize_url(urlunparse(('http', netloc, path, '', '', ''))))
+            if scheme != 'https':
+                variants.add(self._normalize_url(urlunparse(('https', netloc, path, '', '', ''))))
+
+            # Toggle www
+            if netloc.startswith('www.'):
+                variants.add(self._normalize_url(urlunparse((scheme or 'http', netloc[4:], path, '', '', ''))))
+            else:
+                variants.add(self._normalize_url(urlunparse((scheme or 'http', f'www.{netloc}', path, '', '', ''))))
+
+        except Exception:
+            pass
+
+        return list(variants)
     
     def _detect_http_changes(self, url: str, current: UrlMetadata, previous: Dict) -> List[ChangeDetails]:
         """Detect HTTP-level changes"""

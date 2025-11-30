@@ -160,6 +160,7 @@ jobs:
             echo "REPORT_DIR=$REPORT_DIR"
             echo "SERVICE_STARTUP_DELAY=${SERVICE_STARTUP_DELAY:-$WAIT_INTERVAL}"
           } >> $GITHUB_ENV
+          echo "GOOGLE_SHEETS_USE_ENV=${GOOGLE_SHEETS_USE_ENV:-false}" >> $GITHUB_ENV
           
           echo " Environment configured"
           echo "Service URL: $CHANGEDETECTION_URL"

@@ -334,6 +334,13 @@ jobs:
               -e GITHUB_RUN_ATTEMPT="$GITHUB_RUN_ATTEMPT" \
               -e GITHUB_SHA="$GITHUB_SHA" \
               -e GITHUB_REF="$GITHUB_REF" \
+              -e GOOGLE_SHEETS_USE_ENV="$GOOGLE_SHEETS_USE_ENV" \
+              -e GOOGLE_SHEETS_TYPE="$GOOGLE_SHEETS_TYPE" \
+              -e GOOGLE_SHEETS_PROJECT_ID="$GOOGLE_SHEETS_PROJECT_ID" \
+              -e GOOGLE_SHEETS_PRIVATE_KEY_ID="$GOOGLE_SHEETS_PRIVATE_KEY_ID" \
+              -e GOOGLE_SHEETS_PRIVATE_KEY="$GOOGLE_SHEETS_PRIVATE_KEY" \
+              -e GOOGLE_SHEETS_CLIENT_EMAIL="$GOOGLE_SHEETS_CLIENT_EMAIL" \
+              -e GOOGLE_SHEETS_CLIENT_ID="$GOOGLE_SHEETS_CLIENT_ID" \
               -e MONITOR_RUN_TYPE="${{ github.event.inputs.run_type || 'standard' }}" \
               -e FIRST_RUN="$FIRST_RUN" \
               -e VERBOSE="$VERBOSE" \

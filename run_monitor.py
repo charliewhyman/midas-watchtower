@@ -1,5 +1,6 @@
 import logging
 import os
+import sys
 import json
 from pathlib import Path
 from datetime import datetime
@@ -7,15 +8,33 @@ from datetime import datetime
 def setup_logging():
     """Setup logging configuration"""
     log_dir = Path("logs")
-    log_dir.mkdir(exist_ok=True)
-    
+
+    # Try to create the log directory; if this fails we'll fall back to console logging.
+    try:
+        log_dir.mkdir(parents=True, exist_ok=True)
+    except Exception as e:
+        # Can't create the directory — report to stderr and continue with console logging only.
+        print(f"Warning: could not create log directory '{log_dir}': {e}", file=sys.stderr)
+
+    # Prepare handlers: prefer a FileHandler, but fall back to StreamHandler on permission errors.
+    handlers = []
+    logfile_path = log_dir / f"monitor_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
+    try:
+        handlers.append(logging.FileHandler(logfile_path))
+    except PermissionError as e:
+        # Permission denied writing to the mounted logs directory — fall back to console.
+        print(f"Warning: cannot write log file '{logfile_path}': {e}. Falling back to stdout/stderr.", file=sys.stderr)
+    except Exception as e:
+        # Some other IO error; still fall back to console but show the problem.
+        print(f"Warning: could not open log file '{logfile_path}': {e}. Falling back to stdout/stderr.", file=sys.stderr)
+
+    # Always include a stream handler so messages appear on the console
+    handlers.append(logging.StreamHandler())
+
     logging.basicConfig(
         level=logging.INFO,
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-        handlers=[
-            logging.FileHandler(log_dir / f"monitor_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"),
-            logging.StreamHandler()
-        ]
+        handlers=handlers
     )
     return logging.getLogger(__name__)
 
@@ -81,14 +100,15 @@ def ensure_data_directories():
     
     for dir_path in directories:
         path = Path(dir_path)
-        path.mkdir(exist_ok=True)
         try:
+            path.mkdir(parents=True, exist_ok=True)
             # Try to create a test file to check write permissions
             test_file = path / ".write_test"
             test_file.touch()
             test_file.unlink()
         except Exception as e:
-            logger.warning(f"Directory {dir_path} may not be writable: {e}")
+            # Logging may not be available at this point; print to stderr so the caller sees the problem.
+            print(f"Warning: Directory {dir_path} may not be writable: {e}", file=sys.stderr)
 
 def main():
     """Main monitoring execution"""

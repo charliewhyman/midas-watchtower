@@ -40,6 +40,13 @@ jobs:
           echo " Scripts directory structure:"
           ls -la .github/scripts/ || echo "No scripts directory"
 
+      - name: Ensure data directories exist for cache
+        run: |
+          # Ensure cache paths exist so actions/cache will save without warnings
+          mkdir -p data/datastore data/reports
+          # Create an empty URL history file if missing (touch is safe)
+          touch data/url_history.json || true
+
       - name: Cache monitoring data
         uses: actions/cache@v4
         id: data-cache

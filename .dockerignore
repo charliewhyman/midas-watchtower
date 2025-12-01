@@ -1,3 +1,16 @@
+# Ignore local caches and artifacts that should not be sent in the Docker build context
+docker-images/
+data/
+logs/
+docker-logs/
+.venv/
+.pytest_cache/
+__pycache__/
+.git/
+secrets/
+
+# Ignore GitHub workflow artifacts
+.github/actions/
 .git
 .gitignore
 README.md

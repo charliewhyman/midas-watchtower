@@ -202,6 +202,17 @@ jobs:
             fi
           done
 
+      - name: Remove local image tarballs from workspace before build
+        run: |
+          # Prevent large tarballs from being included in the Docker build context.
+          # We load the images into the daemon above; the files are no longer needed.
+          if [ -d docker-images ]; then
+            echo "Cleaning up docker-images/ to keep build context small"
+            rm -rf docker-images || true
+          else
+            echo "No docker-images/ dir to remove"
+          fi
+
       - name: Cache Python packages
         uses: actions/cache@v4
         id: pip-cache

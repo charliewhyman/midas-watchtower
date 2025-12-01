@@ -7,6 +7,9 @@ import gspread
 from config import AppConfig
 from models import DetectedChange
 import logging
+import time
+from typing import List, Tuple
+import math
 
 logger = logging.getLogger(__name__)
 
@@ -259,6 +262,83 @@ class GoogleSheetsReporter:
         except Exception as e:
             logger.error(f"Failed to log change to Google Sheets: {e}")
             return False
+
+    def _retry_api_call(self, func, *args, max_retries: int = 5, initial_backoff: float = 1.0, **kwargs):
+        """Helper to retry API calls with exponential backoff on rate limit errors.
+
+        Detects rate limit by status code 429 or presence of 'RATE_LIMIT'/'quota' in exception text.
+        """
+        attempt = 0
+        backoff = initial_backoff
+        while attempt < max_retries:
+            try:
+                return func(*args, **kwargs)
+            except Exception as e:
+                msg = str(e)
+                # Consider 429 or rate limit text as retryable
+                if '429' in msg or 'RATE_LIMIT' in msg or 'quota' in msg.lower() or 'RESOURCE_EXHAUSTED' in msg:
+                    attempt += 1
+                    sleep_time = backoff * (2 ** (attempt - 1))
+                    sleep_time = min(sleep_time, 60)
+                    logger.warning(f"Rate-limited by Sheets API (attempt {attempt}/{max_retries}), retrying in {sleep_time}s: {e}")
+                    time.sleep(sleep_time)
+                    continue
+                # Non-rate-limit errors should bubble up
+                raise
+        # If we exit loop, raise last error
+        raise Exception(f"Max retries exceeded for API call: {func.__name__}")
+
+    def log_changes(self, changes: List[DetectedChange], batch_size: int = 50) -> Tuple[int, int]:
+        """Log multiple changes in batches to reduce Sheets API requests.
+
+        Returns a tuple (successful_count, failed_count).
+        """
+        if not self.client:
+            logger.error("Google Sheets client not available")
+            return 0, len(changes)
+
+        try:
+            spreadsheet = self.ensure_spreadsheet_exists()
+            if not spreadsheet:
+                logger.error("Failed to get or create spreadsheet")
+                return 0, len(changes)
+
+            worksheet = self.setup_sheets_structure(spreadsheet)
+            if not worksheet:
+                logger.error("Failed to get or create worksheet")
+                return 0, len(changes)
+
+            # Prepare all rows
+            rows = [self._prepare_change_row(c) for c in changes]
+
+            successful = 0
+            failed = 0
+
+            # Chunk into batches to avoid huge requests and to respect per-request limits
+            total = len(rows)
+            if total == 0:
+                return 0, 0
+
+            num_batches = math.ceil(total / batch_size)
+            for i in range(num_batches):
+                start = i * batch_size
+                end = min(start + batch_size, total)
+                batch_rows = rows[start:end]
+
+                try:
+                    # Use append_rows which performs a single API call per batch
+                    self._retry_api_call(worksheet.append_rows, batch_rows, value_input_option='USER_ENTERED')
+                    successful += len(batch_rows)
+                    logger.info(f"Appended batch {i+1}/{num_batches} with {len(batch_rows)} rows to Sheets")
+                except Exception as e:
+                    logger.error(f"Failed to append batch {i+1}/{num_batches} to Sheets: {e}")
+                    failed += len(batch_rows)
+
+            return successful, failed
+
+        except Exception as e:
+            logger.error(f"Failed to log changes to Google Sheets: {e}")
+            return 0, len(changes)
     
     def _prepare_change_row(self, change: DetectedChange) -> list:
         """Prepare a row for the Changes_Log sheet"""

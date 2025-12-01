@@ -493,21 +493,16 @@ class MonitoringService:
     def _log_changes_to_sheets(self, changes: List[DetectedChange]) -> Dict[str, int]:
         """Log changes to Google Sheets and return results"""
         results = {'successful': 0, 'failed': 0}
-        
-        for change in changes:
-            try:
-                success = self.sheets_reporter.log_change(change)
-                if success:
-                    results['successful'] += 1
-                    logger.debug(f"Successfully logged change for {change.url} to sheets")
-                else:
-                    results['failed'] += 1
-                    logger.warning(f"Failed to log change for {change.url} to sheets")
-            except Exception as e:
-                logger.error(f"Error logging change for {change.url} to sheets: {e}")
-                results['failed'] += 1
-        
-        return results
+        try:
+            successful, failed = self.sheets_reporter.log_changes(changes)
+            results['successful'] = successful
+            results['failed'] = failed
+            return results
+        except Exception as e:
+            logger.error(f"Batch logging to Sheets failed: {e}")
+            # Fallback: count all as failed
+            results['failed'] = len(changes)
+            return results
     
     def _generate_reports(self, changes: List[DetectedChange], stats: MonitoringCycleStats) -> None:
         """Generate all reports"""

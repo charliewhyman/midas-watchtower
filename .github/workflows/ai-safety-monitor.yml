@@ -232,9 +232,16 @@ jobs:
             /tmp/pip-cache
             **/__pycache__
             **/.pytest_cache
-          key: ${{ runner.os }}-python-${{ hashFiles('**/requirements.txt') }}
+          # Append a stable suffix so we can invalidate deliberately later
+          key: ${{ runner.os }}-python-${{ hashFiles('**/requirements.txt') }}-v1
           restore-keys: |
             ${{ runner.os }}-python-
+      - name: Debug computed pip cache key
+        if: always()
+        run: |
+          echo "requirements exists: $( [ -f requirements.txt ] && echo yes || echo no )"
+          echo "hash: ${{ hashFiles('**/requirements.txt') }}"
+          echo "computed key: ${{ runner.os }}-python-${{ hashFiles('**/requirements.txt') }}-v1"
 
       - name: Cache Docker layers
         uses: actions/cache@v4
@@ -245,9 +252,17 @@ jobs:
 
             ~/.cache/docker
             # Note: do NOT attempt to cache /var/lib/docker on hosted runners (permission denied)
-          key: ${{ runner.os }}-docker-${{ hashFiles('docker-compose.yml', 'Dockerfile', 'requirements.txt') }}
+          # Append a stable suffix so we can invalidate deliberately later
+          key: ${{ runner.os }}-docker-${{ hashFiles('docker-compose.yml', 'Dockerfile', 'requirements.txt') }}-v1
           restore-keys: |
             ${{ runner.os }}-docker-
+      - name: Debug computed docker cache key
+        if: always()
+        run: |
+          echo "docker files presence:"
+          for f in docker-compose.yml Dockerfile requirements.txt; do echo "$f: $( [ -f $f ] && echo yes || echo no )"; done
+          echo "hash: ${{ hashFiles('docker-compose.yml', 'Dockerfile', 'requirements.txt') }}"
+          echo "computed key: ${{ runner.os }}-docker-${{ hashFiles('docker-compose.yml', 'Dockerfile', 'requirements.txt') }}-v1"
 
       - name: Verify cache status
         run: |

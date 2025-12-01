@@ -2,12 +2,10 @@
 import time
 import os
 import json
-import socket
 from datetime import datetime
 from typing import Dict, List, Any
 from pathlib import Path
 
-import requests
 
 from config import AppConfig
 from http_monitor import HttpMonitor

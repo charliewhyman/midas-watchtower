@@ -5,7 +5,6 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 
 from fastapi import FastAPI, Depends, HTTPException, BackgroundTasks
-import requests
 import uvicorn
 
 from monitoring_service import MonitoringService

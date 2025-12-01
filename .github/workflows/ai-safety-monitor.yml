@@ -223,6 +223,25 @@ jobs:
           touch ~/.cache/docker/.keep || true
           echo "Cache directories ensured"
 
+      - name: Fix host mount permissions for mounted directories
+        run: |
+          echo "Ensuring host-side mount directories exist and are writable"
+          # Ensure the directories exist so they can be mounted into containers
+          mkdir -p "$LOG_DIR" "$REPORT_DIR" "data/datastore" "data/reports"
+
+          # Try to set ownership to the current runner user so container processes
+          # running as non-root can write to mounts. Fall back to permissive mode.
+          if command -v id >/dev/null 2>&1; then
+            OWNER_UID=$(id -u)
+            OWNER_GID=$(id -g)
+            echo "Setting ownership to ${OWNER_UID}:${OWNER_GID} for $LOG_DIR $REPORT_DIR data"
+            chown -R "${OWNER_UID}:${OWNER_GID}" "$LOG_DIR" "$REPORT_DIR" data || true
+          fi
+
+          # Make mounts writable by all as a resilient fallback (CI runners are ephemeral)
+          chmod -R 0777 "$LOG_DIR" "$REPORT_DIR" data || true
+          echo "Host mount permissions fixed"
+
       - name: Cache Python packages
         uses: actions/cache@v4
         id: pip-cache
@@ -429,12 +448,17 @@ jobs:
           chmod -R 775 "$LOG_DIR" "$REPORT_DIR" "data"
           mkdir -p "$LOG_DIR" "$REPORT_DIR" "data/datastore" "data/reports"
           chmod -R 777 "$LOG_DIR" "$REPORT_DIR" "data"
-          
+
+          # Compute runner UID/GID so containers can be run as the host user.
+          RUN_UID=$(id -u || echo 1000)
+          RUN_GID=$(id -g || echo 1000)
+
           chmod -R 775 "$LOG_DIR" "$REPORT_DIR" "data"
           for attempt in $(seq 1 "$MAX_MONITOR_ATTEMPTS"); do
             log_info "Monitoring Attempt $attempt/$MAX_MONITOR_ATTEMPTS"
             
             if $DOCKER_COMPOSE_CMD -p "$DOCKER_COMPOSE_PROJECT" run --rm \
+              --user "${RUN_UID}:${RUN_GID}" \
               -v "$(pwd)/$LOG_DIR:/app/logs" \
               -v "$(pwd)/$REPORT_DIR:/app/data/reports" \
               -v "$(pwd)/data:/app/data" \

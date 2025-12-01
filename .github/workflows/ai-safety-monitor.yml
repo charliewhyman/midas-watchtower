@@ -213,6 +213,16 @@ jobs:
             echo "No docker-images/ dir to remove"
           fi
 
+      - name: Ensure cache directories exist
+        run: |
+          # Create directories expected by actions/cache so the action doesn't warn
+          mkdir -p ~/.cache/pip /tmp/pip-cache ~/.cache/docker docker-images
+          # Touch a file in each to ensure the path is recognized as non-empty where needed
+          touch ~/.cache/pip/.keep || true
+          touch /tmp/pip-cache/.keep || true
+          touch ~/.cache/docker/.keep || true
+          echo "Cache directories ensured"
+
       - name: Cache Python packages
         uses: actions/cache@v4
         id: pip-cache

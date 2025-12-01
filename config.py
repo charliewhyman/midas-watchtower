@@ -25,15 +25,16 @@ class MonitorSettings(BaseSettings):
     google_sheets_auth_provider_x509_cert_url: str = "https://www.googleapis.com/oauth2/v1/certs"
     google_sheets_client_x509_cert_url: Optional[str] = None
     
-    # Changedetection.io Configuration
-    changedetection_url: str = "http://changedetection:5000"
-    changedetection_api_key: Optional[str] = None
-    
     # Application Settings
     polling_interval: int = 300  # 5 minutes
     request_timeout: int = 10
     max_retries: int = 3
     log_level: str = "INFO"
+    # Thresholds for change detection (tunable per deployment)
+    content_size_threshold: int = 1000  # bytes change considered significant
+    word_count_threshold: int = 50  # words change considered significant
+    word_count_major_threshold: int = 100  # larger change threshold
+    policy_keyword_count_threshold: int = 2  # keyword count delta considered significant
     
     # File Paths
     data_dir: str = "data"
@@ -192,7 +193,6 @@ class AppConfig:
             'polling_interval': self.scheduling.polling_interval,
             'priority_distribution': priority_counts,
             'type_distribution': type_counts,
-            'changedetection_configured': bool(self.settings.changedetection_api_key),
             'sheets_configured': self.settings.get_google_sheets_credential_source() != "file"
         }
 

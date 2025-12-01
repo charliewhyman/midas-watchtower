@@ -77,7 +77,6 @@ async def health_check(service: MonitoringService = Depends(get_monitor_service)
         "status": "healthy",
         "timestamp": datetime.now().isoformat(),
         "sheets_connected": status['sheets_connected'],
-        "changedetection_available": status['changedetection_available'],
         "total_urls": status['total_monitored_urls'],
         "central_check_interval": service.config.central_check_interval
     }
@@ -191,78 +190,6 @@ async def debug_status(service: MonitoringService = Depends(get_monitor_service)
             "config_file_exists": os.path.exists('config.yaml')
         }
     }
-
-
-@app.post("/api/setup-watches")
-async def setup_watches(service: MonitoringService = Depends(get_monitor_service)):
-    """Trigger changedetection.io watch setup"""
-    try:
-        service.changedetection_service.setup_watches(service.change_detector)
-        return {
-            "status": "success", 
-            "message": "Watches setup completed",
-            "central_interval_used": service.config.central_check_interval
-        }
-    except Exception as e:
-        logger.error(f"Failed to setup watches: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to setup watches: {e}")
-
-
-@app.get("/api/watches")
-async def list_watches(service: MonitoringService = Depends(get_monitor_service)):
-    """List current watches in changedetection.io"""
-    try:
-        watches = service.changedetection_service.get_existing_watches()
-        watch_list = []
-        for url, watch_info in watches.items():
-            watch_list.append({
-                "url": url,
-                "uuid": watch_info.get('uuid'),
-                "check_interval": watch_info.get('check_interval'),
-                "last_checked": watch_info.get('last_checked'),
-                "last_changed": watch_info.get('last_changed')
-            })
-        
-        return {
-            "total_watches": len(watches),
-            "central_check_interval": service.config.central_check_interval,
-            "watches": watch_list
-        }
-    except Exception as e:
-        logger.error(f"Failed to list watches: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to list watches: {e}")
-
-
-@app.post("/api/watches/sync")
-async def sync_watches(service: MonitoringService = Depends(get_monitor_service)):
-    """Sync watches with current configuration"""
-    try:
-        service.changedetection_service.setup_watches(service.change_detector)
-        return {
-            "status": "success",
-            "message": "Watches synchronized",
-            "central_interval_applied": service.config.central_check_interval
-        }
-    except Exception as e:
-        logger.error(f"Failed to sync watches: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to sync watches: {e}")
-
-
-@app.delete("/api/watches/{url:path}")
-async def delete_watch(url: str, service: MonitoringService = Depends(get_monitor_service)):
-    """Delete a specific watch"""
-    try:
-        success = service.changedetection_service.delete_watch(url)
-        if success:
-            return {"status": "success", "message": f"Watch for {url} deleted"}
-        else:
-            raise HTTPException(status_code=404, detail=f"Watch for {url} not found")
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Failed to delete watch: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to delete watch: {e}")
-
 
 def main():
     """Main entry point for the application"""

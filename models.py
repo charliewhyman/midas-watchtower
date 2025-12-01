@@ -70,7 +70,7 @@ class UrlMetadata(BaseModel):
 class ChangeDetails(BaseModel):
     """Details of a detected change"""
     change_type: str  # 'content_change', 'metadata_change', 'status_change', 'policy_change', etc.
-    source: str  # 'changedetection', 'direct_metadata', 'html_metadata', 'policy_analysis', etc.
+    source: str  # 'direct_metadata', 'html_metadata', 'policy_analysis', etc.
     details: Dict[str, Any] = Field(default_factory=dict)
     severity: str = 'medium'  # low, medium, high, critical
     policy_alert: bool = False  # Whether this is a policy-relevant change
@@ -208,22 +208,3 @@ class EnhancedAppConfig(BaseModel):
             }
         
         return cls(**data)
-
-
-# Response models for API interactions
-class WatchResponse(BaseModel):
-    """Response from changedetection.io watch API"""
-    uuid: str
-    url: str
-    title: Optional[str] = None
-    last_checked: Optional[int] = None
-    last_changed: Optional[int] = None
-    status_code: Optional[int] = None
-
-
-class SystemInfoResponse(BaseModel):
-    """System info response from changedetection.io"""
-    version: str
-    total_watches: int
-    watches_with_errors: int
-    environment: str = "production"

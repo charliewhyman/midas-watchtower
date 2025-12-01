@@ -17,230 +17,45 @@ on:
 
 env:
   DOCKER_COMPOSE_PROJECT: ai-safety-monitor-${{ github.run_number }}
+  DOCKER_LOG_DIR: docker-logs
 
 jobs:
   monitor:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
-
+    
     steps:
-      - name: Checkout code
+      - name: Checkout repository
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
-      - name: Debug workspace structure
+      - name: Ensure data directories exist and set FIRST_RUN
+        id: prepare-data
         run: |
-          echo " Current directory structure:"
-          ls -la
-          echo ""
-          echo " .github directory structure:"
-          ls -la .github/ || echo "No .github directory"
-          echo ""
-          echo " Scripts directory structure:"
-          ls -la .github/scripts/ || echo "No scripts directory"
-
-      - name: Ensure data directories exist for cache
-        run: |
-          # Ensure cache paths exist so actions/cache will save without warnings
-          mkdir -p data/datastore data/reports
-          # Create an empty URL history file if missing (touch is safe)
-          touch data/url_history.json || true
-
-      - name: Cache monitoring data
-        uses: actions/cache@v4
-        id: data-cache
-        with:
-          path: |
-            data/
-
-          # Use a stable key per branch/ref so cache is reusable across runs on the same branch
-          key: monitoring-data-${{ github.ref }}-v1
-          restore-keys: |
-            monitoring-data-
-
-      - name: Check cache result and set first run flag
-        id: check-first-run
-        run: |
-          echo " Cache result: ${{ steps.data-cache.outputs.cache-hit }}"
-          
-          if [[ "${{ steps.data-cache.outputs.cache-hit }}" == 'true' ]]; then
-            echo " Cache hit - continuing from previous data"
+          mkdir -p data/datastore data/reports data/logs
+          if [ -s data/url_history.json ]; then
             echo "FIRST_RUN=false" >> $GITHUB_ENV
             echo "first_run=false" >> $GITHUB_OUTPUT
-            
-            # Verify the cached data exists
-            echo " Cached data contents:"
-            find data/ -type f -name "*" 2>/dev/null | head -10 || echo "No cached files found"
           else
-            echo " Cache miss - first run detected"
             echo "FIRST_RUN=true" >> $GITHUB_ENV
             echo "first_run=true" >> $GITHUB_OUTPUT
-            
-            # Initialize data directories
-            mkdir -p data/datastore data/reports
-            echo " Initialized empty data directories"
           fi
 
-      - name: Restore data permissions and structure
+      - name: Setup environment (safe source)
         run: |
-          echo " Setting up data directories..."
-          mkdir -p data/datastore data/reports data/logs
-          # Set directories to 755 and files to 644 for better security
-          find data/ -type d -exec chmod 755 {} \; || true
-          find data/ -type f -exec chmod 644 {} \; || true
-          
-          echo " Existing data content:"
-          find data/ -type f -name "*.json" | head -10 || echo "No existing data files"
-          echo "Datastore files:"
-          ls -la data/datastore/ 2>/dev/null || echo "No datastore files yet"
-
-      - name: Verify prerequisites and scripts
-        run: |
-          echo " Checking prerequisites..."
-          command -v docker && echo " docker found: $(docker --version)" || (echo " docker not found"; exit 1)
-          
-          # Check for docker compose (plugin) or docker-compose (standalone)
-          if docker compose version >/dev/null 2>&1; then
-            echo " docker compose (plugin) found: $(docker compose version | head -1)"
-            echo "DOCKER_COMPOSE_CMD=docker compose" >> $GITHUB_ENV
-          elif command -v docker-compose >/dev/null 2>&1; then
-            echo " docker-compose (standalone) found: $(docker-compose --version)"
-            echo "DOCKER_COMPOSE_CMD=docker-compose" >> $GITHUB_ENV
-          else
-            echo " Neither docker compose nor docker-compose found"
-            exit 1
+          if [ -f .github/scripts/config.sh ]; then
+            set -a
+            # shellcheck disable=SC1091
+            source .github/scripts/config.sh
+            set +a
           fi
-          
-          command -v curl && echo " curl found: $(curl --version | head -1)" || (echo " curl not found"; exit 1)
-          command -v jq && echo " jq found: $(jq --version)" || (echo " jq not found"; exit 1)
-          
-          echo ""
-          echo " Checking required scripts..."
-          required_scripts=(
-            ".github/scripts/config.sh"
-            ".github/scripts/logger.sh"
-            ".github/scripts/wait-for-service.sh"
-            ".github/scripts/extract-api-key.sh"
-          )
-          
-          for script in "${required_scripts[@]}"; do
-            if [ ! -f "$script" ]; then
-              echo " Required script not found: $script"
-              exit 1
-            fi
-            chmod +x "$script"
-            echo " $script is executable"
-          done
-          
-          echo " All prerequisites and scripts available"
-
-      - name: Setup environment
-        run: |
-          # Source config and make available to subsequent steps
-          set -a  # Automatically export all variables
-          source .github/scripts/config.sh
-          set +a
-          
-          # Export all config variables for subsequent steps
-          {
-            echo "CHANGEDETECTION_PORT=$CHANGEDETECTION_PORT"
-            echo "CHANGEDETECTION_HOST=$CHANGEDETECTION_HOST"
-            echo "CHANGEDETECTION_URL=$CHANGEDETECTION_URL"
-            echo "CHANGEDETECTION_CONTAINER_URL=$CHANGEDETECTION_CONTAINER_URL"
-            echo "MAX_WAIT_ATTEMPTS=$MAX_WAIT_ATTEMPTS"
-            echo "WAIT_INTERVAL=$WAIT_INTERVAL"
-            echo "MAX_MONITOR_ATTEMPTS=$MAX_MONITOR_ATTEMPTS"
-            echo "RESTART_DELAY=$RESTART_DELAY"
-            echo "DATASTORE_FILE=$DATASTORE_FILE"
-            echo "LOCAL_DATASTORE=$LOCAL_DATASTORE"
-            echo "API_KEY_FIELD=$API_KEY_FIELD"
-            echo "LOG_DIR=$LOG_DIR"
-            echo "DOCKER_LOG_DIR=$DOCKER_LOG_DIR"
-            echo "REPORT_DIR=$REPORT_DIR"
-            echo "SERVICE_STARTUP_DELAY=${SERVICE_STARTUP_DELAY:-$WAIT_INTERVAL}"
-          } >> $GITHUB_ENV
           echo "GOOGLE_SHEETS_USE_ENV=${GOOGLE_SHEETS_USE_ENV:-false}" >> $GITHUB_ENV
-          
-          echo " Environment configured"
-          echo "Service URL: $CHANGEDETECTION_URL"
-          echo "Docker Compose Command: $DOCKER_COMPOSE_CMD"
 
       - name: Setup Docker Buildx
         uses: docker/setup-buildx-action@v3
-        with:
-          driver: docker-container
-          buildkitd-flags: --debug
 
-      - name: Restore cached service images
-        uses: actions/cache@v4
-        id: image-cache-restore
-        with:
-          path: |
-            docker-images/
-          key: docker-images-${{ runner.os }}-${{ hashFiles('docker-compose.yaml') }}
-          restore-keys: |
-            docker-images-
-
-      - name: Load cached images (if present)
+      - name: Ensure cache directories
         run: |
-          set -e
-          mkdir -p docker-images
-          # Map expected images to files
-          declare -A imgs=(
-            [changedetection]=ghcr.io/dgtlmoon/changedetection.io:latest
-            [playwright-chrome]=browserless/chrome:latest
-          )
-
-          for key in "${!imgs[@]}"; do
-            tarfile="docker-images/${key}.tar"
-            if [ -f "$tarfile" ]; then
-              echo "Loading cached image for ${key} from $tarfile"
-              docker load -i "$tarfile" || echo "docker load failed for $tarfile"
-            else
-              echo "No cached tar for ${key}"
-            fi
-          done
-
-      - name: Remove local image tarballs from workspace before build
-        run: |
-          # Prevent large tarballs from being included in the Docker build context.
-          # We load the images into the daemon above; the files are no longer needed.
-          if [ -d docker-images ]; then
-            echo "Cleaning up docker-images/ to keep build context small"
-            rm -rf docker-images || true
-          else
-            echo "No docker-images/ dir to remove"
-          fi
-
-      - name: Ensure cache directories exist
-        run: |
-          # Create directories expected by actions/cache so the action doesn't warn
-          mkdir -p ~/.cache/pip /tmp/pip-cache ~/.cache/docker docker-images
-          # Touch a file in each to ensure the path is recognized as non-empty where needed
+          mkdir -p ~/.cache/pip /tmp/pip-cache ~/.cache/docker
           touch ~/.cache/pip/.keep || true
-          touch /tmp/pip-cache/.keep || true
-          touch ~/.cache/docker/.keep || true
-          echo "Cache directories ensured"
-
-      - name: Fix host mount permissions for mounted directories
-        run: |
-          echo "Ensuring host-side mount directories exist and are writable"
-          # Ensure the directories exist so they can be mounted into containers
-          mkdir -p "$LOG_DIR" "$REPORT_DIR" "data/datastore" "data/reports"
-
-          # Try to set ownership to the current runner user so container processes
-          # running as non-root can write to mounts. Fall back to permissive mode.
-          if command -v id >/dev/null 2>&1; then
-            OWNER_UID=$(id -u)
-            OWNER_GID=$(id -g)
-            echo "Setting ownership to ${OWNER_UID}:${OWNER_GID} for $LOG_DIR $REPORT_DIR data"
-            chown -R "${OWNER_UID}:${OWNER_GID}" "$LOG_DIR" "$REPORT_DIR" data || true
-          fi
-
-          # Make mounts writable by all as a resilient fallback (CI runners are ephemeral)
-          chmod -R 0777 "$LOG_DIR" "$REPORT_DIR" data || true
-          echo "Host mount permissions fixed"
 
       - name: Cache Python packages
         uses: actions/cache@v4
@@ -249,52 +64,10 @@ jobs:
           path: |
             ~/.cache/pip
             /tmp/pip-cache
-            **/__pycache__
             **/.pytest_cache
-          # Append a stable suffix so we can invalidate deliberately later
           key: ${{ runner.os }}-python-${{ hashFiles('**/requirements.txt') }}-v1
           restore-keys: |
             ${{ runner.os }}-python-
-      - name: Debug computed pip cache key
-        if: always()
-        run: |
-          echo "requirements exists: $( [ -f requirements.txt ] && echo yes || echo no )"
-          echo "hash: ${{ hashFiles('**/requirements.txt') }}"
-          echo "computed key: ${{ runner.os }}-python-${{ hashFiles('**/requirements.txt') }}-v1"
-
-      - name: Cache Docker layers
-        uses: actions/cache@v4
-        id: docker-cache
-        with:
-          path: |
-
-
-            ~/.cache/docker
-            # Note: do NOT attempt to cache /var/lib/docker on hosted runners (permission denied)
-          # Append a stable suffix so we can invalidate deliberately later
-          key: ${{ runner.os }}-docker-${{ hashFiles('docker-compose.yml', 'Dockerfile', 'requirements.txt') }}-v1
-          restore-keys: |
-            ${{ runner.os }}-docker-
-      - name: Debug computed docker cache key
-        if: always()
-        run: |
-          echo "docker files presence:"
-          for f in docker-compose.yml Dockerfile requirements.txt; do echo "$f: $( [ -f $f ] && echo yes || echo no )"; done
-          echo "hash: ${{ hashFiles('docker-compose.yml', 'Dockerfile', 'requirements.txt') }}"
-          echo "computed key: ${{ runner.os }}-docker-${{ hashFiles('docker-compose.yml', 'Dockerfile', 'requirements.txt') }}-v1"
-
-      - name: Verify cache status
-        run: |
-          echo " Cache Status:"
-          echo "Python cache hit: ${{ steps.pip-cache.outputs.cache-hit }}"
-          echo "Docker cache hit: ${{ steps.docker-cache.outputs.cache-hit }}"
-          echo "Data cache hit: ${{ steps.data-cache.outputs.cache-hit }}"
-          
-          if [[ "${{ steps.docker-cache.outputs.cache-hit }}" != 'true' ]]; then
-            echo "Docker cache miss - this is normal for first run or when files change"
-          else
-            echo " Docker cache hit - layers will be reused"
-          fi
 
       - name: Build and start services
         run: |
@@ -303,247 +76,46 @@ jobs:
           log_info "Building metadata-monitor image with cache..."
           $DOCKER_COMPOSE_CMD build --progress plain --build-arg BUILDKIT_INLINE_CACHE=1 metadata-monitor
           
-          log_info "Starting changedetection and playwright services..."
-          $DOCKER_COMPOSE_CMD -p $DOCKER_COMPOSE_PROJECT up -d changedetection playwright-chrome
-          
-          log_success "Services started successfully"
+          log_info "Starting metadata-monitor service..."
+          $DOCKER_COMPOSE_CMD -p $DOCKER_COMPOSE_PROJECT up -d metadata-monitor
 
-      - name: Save service images to cache
-        if: always()
+          log_success "metadata-monitor started successfully"
+
+      - name: Run monitoring container
         run: |
-          set -e
-          mkdir -p docker-images
-
-          echo "Saving changedetection image..."
-          if docker image inspect ghcr.io/dgtlmoon/changedetection.io:latest >/dev/null 2>&1; then
-            docker save ghcr.io/dgtlmoon/changedetection.io:latest -o docker-images/changedetection.tar || true
+          # Determine docker compose command (plugin or legacy)
+          if docker compose version >/dev/null 2>&1; then
+            DOCKER_COMPOSE_CMD='docker compose'
+          elif command -v docker-compose >/dev/null 2>&1; then
+            DOCKER_COMPOSE_CMD='docker-compose'
           else
-            echo "changedetection image not present locally, skipping save"
-          fi
-
-          echo "Saving playwright-chrome image..."
-          if docker image inspect browserless/chrome:latest >/dev/null 2>&1; then
-            docker save browserless/chrome:latest -o docker-images/playwright-chrome.tar || true
-          else
-            echo "playwright-chrome image not present locally, skipping save"
-          fi
-
-          echo "Saving local built image metadata-monitor..."
-          if docker image inspect metadata-monitor:latest >/dev/null 2>&1; then
-            docker save metadata-monitor:latest -o docker-images/metadata-monitor.tar || true
-          else
-            echo "metadata-monitor image not found (may have different tag), attempting to find by name"
-            docker images --format '{{.Repository}}:{{.Tag}}' | grep '^metadata-monitor:' || true
-          fi
-
-      - name: Cache saved service images
-        uses: actions/cache@v4
-        id: image-cache-save
-        with:
-          path: |
-            docker-images/
-          key: docker-images-${{ runner.os }}-${{ hashFiles('docker-compose.yaml') }}
-          restore-keys: |
-            docker-images-
-
-      - name: Wait for basic connectivity
-        run: |
-          .github/scripts/wait-for-service.sh "$CHANGEDETECTION_URL" "$MAX_WAIT_ATTEMPTS" "$WAIT_INTERVAL"
-
-      - name: Extract API key from changedetection datastore
-        id: extract-api-key
-        run: |
-          API_KEY=$(.github/scripts/extract-api-key.sh)
-          echo "CHANGEDETECTION_API_KEY=$API_KEY" >> $GITHUB_ENV
-          echo "api_key=$API_KEY" >> $GITHUB_OUTPUT
-          echo "::add-mask::$API_KEY"
-
-      - name: Test systeminfo endpoint
-        env:
-          API_KEY: ${{ steps.extract-api-key.outputs.api_key }}
-        run: |
-          source .github/scripts/logger.sh
-          
-          log_info "Testing systeminfo endpoint..."
-          
-          response=$(curl -s -X GET "$CHANGEDETECTION_URL/api/v1/systeminfo" \
-            -H "x-api-key: $API_KEY" \
-            -w "\n%{http_code}")
-          
-          http_code=$(echo "$response" | tail -1)
-          
-          if [ "$http_code" = "200" ]; then
-            log_success "systeminfo endpoint returned HTTP 200"
-          else
-            log_failure "systeminfo endpoint returned HTTP $http_code"
-            log_info "Response body:"
-            echo "$response" | head -n -1
+            echo 'docker compose not available' >&2
             exit 1
           fi
 
-      - name: Prepare directories
-        run: |
-          source .github/scripts/logger.sh
-          
-          # Ensure directories exist before changing permissions to avoid failures
-          mkdir -p "$REPORT_DIR" "$LOG_DIR" "$DOCKER_LOG_DIR" "data/datastore" "data/reports"
+          # Ensure service is running
+          $DOCKER_COMPOSE_CMD -p "$DOCKER_COMPOSE_PROJECT" build --parallel metadata-monitor
+          $DOCKER_COMPOSE_CMD -p "$DOCKER_COMPOSE_PROJECT" up -d metadata-monitor
 
-          # Make permission changes resilient: should succeed now that dirs exist,
-          # but use || true to avoid failing the whole workflow on unexpected errors.
-          chmod -R 755 "$REPORT_DIR" "$LOG_DIR" "$DOCKER_LOG_DIR" "data" || true
-          chmod -R 777 "$REPORT_DIR" "$LOG_DIR" "$DOCKER_LOG_DIR" "data" || true
-
-
-      - name: Initialize on first run
-        if: steps.check-first-run.outputs.first_run == 'true'
-        run: |
-          source .github/scripts/logger.sh
-          log_info "First run detected - setting up initial configuration"
-          
-          # Ensure directories exist
-          mkdir -p data/datastore data/reports
-          
-          log_success "First run initialization completed"
-
-      - name: Run monitoring cycle
-        env:
-          API_KEY: ${{ steps.extract-api-key.outputs.api_key }}
-          VERBOSE: ${{ github.event.inputs.run_type == 'verbose' || github.event.inputs.run_type == 'debug' }}
-          DEBUG: ${{ github.event.inputs.run_type == 'debug' }}
-          GOOGLE_SHEETS_TYPE: ${{ secrets.GOOGLE_SHEETS_TYPE }}
-          GOOGLE_SHEETS_PROJECT_ID: ${{ secrets.GOOGLE_SHEETS_PROJECT_ID }}
-          GOOGLE_SHEETS_PRIVATE_KEY_ID: ${{ secrets.GOOGLE_SHEETS_PRIVATE_KEY_ID }}
-          GOOGLE_SHEETS_PRIVATE_KEY: ${{ secrets.GOOGLE_SHEETS_PRIVATE_KEY }}
-          GOOGLE_SHEETS_CLIENT_EMAIL: ${{ secrets.GOOGLE_SHEETS_CLIENT_EMAIL }}
-          GOOGLE_SHEETS_CLIENT_ID: ${{ secrets.GOOGLE_SHEETS_CLIENT_ID }}
-        run: |
-          set -e
-          source .github/scripts/logger.sh
-
-          # Get the first_run value directly from the step output
-          FIRST_RUN="${{ steps.check-first-run.outputs.first_run }}"
-          
-          log_info "First run status: $FIRST_RUN"
-          log_info "Data cache hit: ${{ steps.data-cache.outputs.cache-hit }}"
-          
-          # Enable debug mode if requested
-          if [ "$DEBUG" = "true" ]; then
-            set -x
-            export PS4='+ $(date -u "+%H:%M:%S") '
-            log_info "DEBUG mode enabled"
-          fi
-          
-          log_info "Performing final health check..."
-          http_code=$(curl -s -o /dev/null -w "%{http_code}" \
-            -X GET "$CHANGEDETECTION_URL/api/v1/watch" \
-            -H "x-api-key: $API_KEY")
-          
-          if [ "$http_code" != "200" ]; then
-            log_failure "Health check failed - API returned HTTP $http_code"
+          CONTAINER_ID=$($DOCKER_COMPOSE_CMD -p "$DOCKER_COMPOSE_PROJECT" ps -q metadata-monitor || true)
+          if [ -z "$CONTAINER_ID" ]; then
+            echo 'metadata-monitor container failed to start' >&2
             exit 1
           fi
-          
-          log_success "Health check passed"
-          
-          chmod -R 775 "$LOG_DIR" "$REPORT_DIR" "data"
-          mkdir -p "$LOG_DIR" "$REPORT_DIR" "data/datastore" "data/reports"
-          chmod -R 777 "$LOG_DIR" "$REPORT_DIR" "data"
 
-          # Compute runner UID/GID so containers can be run as the host user.
-          RUN_UID=$(id -u || echo 1000)
-          RUN_GID=$(id -g || echo 1000)
-
-          chmod -R 775 "$LOG_DIR" "$REPORT_DIR" "data"
-          for attempt in $(seq 1 "$MAX_MONITOR_ATTEMPTS"); do
-            log_info "Monitoring Attempt $attempt/$MAX_MONITOR_ATTEMPTS"
-            
-            if $DOCKER_COMPOSE_CMD -p "$DOCKER_COMPOSE_PROJECT" run --rm \
-              --user "${RUN_UID}:${RUN_GID}" \
-              -v "$(pwd)/$LOG_DIR:/app/logs" \
-              -v "$(pwd)/$REPORT_DIR:/app/data/reports" \
-              -v "$(pwd)/data:/app/data" \
-              -e CHANGEDETECTION_API_KEY="$API_KEY" \
-              -e CHANGEDETECTION_URL="$CHANGEDETECTION_CONTAINER_URL" \
-              -e GITHUB_ACTIONS=true \
-              -e GITHUB_RUN_ID="$GITHUB_RUN_ID" \
-              -e GITHUB_RUN_ATTEMPT="$GITHUB_RUN_ATTEMPT" \
-              -e GITHUB_SHA="$GITHUB_SHA" \
-              -e GITHUB_REF="$GITHUB_REF" \
-              -e GOOGLE_SHEETS_USE_ENV="$GOOGLE_SHEETS_USE_ENV" \
-              -e GOOGLE_SHEETS_TYPE="$GOOGLE_SHEETS_TYPE" \
-              -e GOOGLE_SHEETS_PROJECT_ID="$GOOGLE_SHEETS_PROJECT_ID" \
-              -e GOOGLE_SHEETS_PRIVATE_KEY_ID="$GOOGLE_SHEETS_PRIVATE_KEY_ID" \
-              -e GOOGLE_SHEETS_PRIVATE_KEY="$GOOGLE_SHEETS_PRIVATE_KEY" \
-              -e GOOGLE_SHEETS_CLIENT_EMAIL="$GOOGLE_SHEETS_CLIENT_EMAIL" \
-              -e GOOGLE_SHEETS_CLIENT_ID="$GOOGLE_SHEETS_CLIENT_ID" \
-              -e MONITOR_RUN_TYPE="${{ github.event.inputs.run_type || 'standard' }}" \
-              -e FIRST_RUN="$FIRST_RUN" \
-              -e VERBOSE="$VERBOSE" \
-              metadata-monitor python run_monitor.py; then
-              
-              log_success "Monitoring completed successfully on attempt $attempt"
-              break
-            else
-              log_failure "Monitoring failed on attempt $attempt"
-              
-              if [ "$attempt" -lt "$MAX_MONITOR_ATTEMPTS" ]; then
-                log_info "Retrying in ${RESTART_DELAY}s..."
-                sleep "$RESTART_DELAY"
-                
-                log_info "Restarting changedetection service..."
-                $DOCKER_COMPOSE_CMD -p "$DOCKER_COMPOSE_PROJECT" restart changedetection
-                # Wait for the service to become available. Use SERVICE_STARTUP_DELAY if provided,
-                # otherwise fall back to WAIT_INTERVAL or 10 seconds.
-                sleep "${SERVICE_STARTUP_DELAY:-${WAIT_INTERVAL:-10}}"
-              else
-                log_failure "All monitoring attempts failed"
-                exit 1
-              fi
-            fi
-          done
-
-      - name: Verify data for caching
-        run: |
-          # Attempt to export changedetection datastore from the running container
-          echo "Attempting to copy changedetection datastore from container to host..."
-          CONTAINER_ID=$($DOCKER_COMPOSE_CMD -p "$DOCKER_COMPOSE_PROJECT" ps -q changedetection 2>/dev/null || true)
-          if [ -n "$CONTAINER_ID" ]; then
-            echo " Found changedetection container: $CONTAINER_ID"
-            mkdir -p data/datastore
-            docker cp "$CONTAINER_ID:/datastore/changedetection.db" data/datastore/ 2>/dev/null || echo " No changedetection.db in container or copy failed"
-            docker cp "$CONTAINER_ID:/datastore/url-watches.json" data/datastore/ 2>/dev/null || echo " No url-watches.json in container or copy failed"
-          else
-            echo " No running changedetection container found to copy datastore from"
-          fi
-
-          echo " Data to be cached for next run:"
-          echo "Datastore contents:"
-          ls -la data/datastore/ 2>/dev/null || echo "No datastore files"
-          echo "Reports contents:"
-          ls -la data/reports/ 2>/dev/null || echo "No report files"
-          echo "URL history file:"
-          if [ -f "data/url_history.json" ]; then
-            echo " data/url_history.json exists: $(wc -c < data/url_history.json) bytes"
-            head -n 40 data/url_history.json || true
-          else
-            echo " data/url_history.json not found"
-          fi
-          
-          if [ -f "data/datastore/changedetection.db" ]; then
-            db_size=$(wc -c < "data/datastore/changedetection.db")
-            echo " changedetection.db ready for cache: $db_size bytes"
-          else
-            echo "️ changedetection.db not found - nothing to cache"
-          fi
-
+          # Run the monitor once; keep mounts minimal for speed
+          $DOCKER_COMPOSE_CMD -p "$DOCKER_COMPOSE_PROJECT" run --rm \
+            -v "$(pwd)/data:/app/data" \
+            -v "$(pwd)/${REPORT_DIR:-data/reports}:/app/data/reports" \
+            metadata-monitor python run_monitor.py
       - name: Save service logs
         if: always()
         run: |
           mkdir -p "$DOCKER_LOG_DIR"
-          $DOCKER_COMPOSE_CMD -p "$DOCKER_COMPOSE_PROJECT" logs changedetection > "$DOCKER_LOG_DIR/changedetection.log" 2>&1 || true
-          $DOCKER_COMPOSE_CMD -p "$DOCKER_COMPOSE_PROJECT" logs playwright-chrome > "$DOCKER_LOG_DIR/playwright.log" 2>&1 || true
+          docker compose -p "$DOCKER_COMPOSE_PROJECT" logs metadata-monitor > "$DOCKER_LOG_DIR/metadata-monitor.log" 2>&1 || true
+          docker compose -p "$DOCKER_COMPOSE_PROJECT" logs metadata-monitor > "${{ env.DOCKER_LOG_DIR || 'docker-logs' }}/metadata-monitor.log" 2>&1 || true
 
-      - name: Upload monitoring reports (optional)
+      - name: Upload monitoring reports
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -551,107 +123,24 @@ jobs:
           path: data/reports/
           retention-days: 30
           if-no-files-found: warn
-
       - name: Upload service logs
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: service-logs-${{ github.run_number }}
-          path: docker-logs/
+          path: ${{ env.DOCKER_LOG_DIR }}
           retention-days: 7
-          if-no-files-found: ignore
-
-      - name: Collect diagnostics on failure
-        if: failure()
-        run: |
-          source .github/scripts/logger.sh
-          
-          mkdir -p diagnostics
-          
-          log_info "Collecting system diagnostics..."
-          
-          # System info
-          uname -a > diagnostics/system-info.txt
-          df -h >> diagnostics/system-info.txt
-          free -h >> diagnostics/system-info.txt
-          
-          # Docker status
-          docker ps -a > diagnostics/docker-containers.txt 2>&1 || true
-          docker network ls > diagnostics/docker-networks.txt 2>&1 || true
-          docker volume ls > diagnostics/docker-volumes.txt 2>&1 || true
-          
-          # Service info
-          $DOCKER_COMPOSE_CMD -p "$DOCKER_COMPOSE_PROJECT" ps > diagnostics/compose-services.txt 2>&1 || true
-          $DOCKER_COMPOSE_CMD -p "$DOCKER_COMPOSE_PROJECT" logs --tail=50 > diagnostics/compose-logs.txt 2>&1 || true
-          
-          # Check if datastore file exists and its content
-          if [ -f "$LOCAL_DATASTORE" ]; then
-            echo "Datastore file exists, size: $(wc -c < "$LOCAL_DATASTORE") bytes" > diagnostics/datastore-info.txt
-            head -c 1000 "$LOCAL_DATASTORE" > diagnostics/datastore-preview.txt 2>&1 || true
-          else
-            echo "No local datastore file found" > diagnostics/datastore-info.txt
-          fi
-          
-          # Data directory structure
-          echo "Data directory structure:" > diagnostics/data-structure.txt
-          find data/ -type f -name "*.json" >> diagnostics/data-structure.txt 2>&1 || true
-          
-          log_success "Diagnostics collected"
-
-      - name: Upload diagnostics
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: failure-diagnostics-${{ github.run_number }}
-          path: diagnostics/
-          retention-days: 14
           if-no-files-found: ignore
 
       - name: Cleanup services (preserve data)
         if: always()
         run: |
-          source .github/scripts/logger.sh
-          
-          log_info "Cleaning up services (preserving data)..."
-          $DOCKER_COMPOSE_CMD -p "$DOCKER_COMPOSE_PROJECT" down --remove-orphans --timeout 30 || true
-          
-          # Show what data we're preserving for cache
-          echo " Data preserved for next run cache:"
-          find data/ -type f -name "*.db" -o -name "*.json" | head -10 || echo "No data files to preserve"
-          
-          log_success "Cleanup completed with data preservation"
+          docker compose -p "$DOCKER_COMPOSE_PROJECT" down --remove-orphans --timeout 30 || true
 
       - name: Create workflow summary
         if: always()
         run: |
-          {
-            echo "## AI Safety Monitor Run Summary"
-            echo ""
-            echo "**Run Details:**"
-            echo "- **Type:** ${{ github.event.inputs.run_type || 'standard' }}"
-            echo "- **Branch:** ${{ github.ref_name }}"
-            echo "- **Commit:** ${{ github.sha }}"
-            echo "- **Timestamp:** $(date -u +"%Y-%m-%d %H:%M:%S UTC")"
-            echo "- **Status:** ${{ job.status }}"
-            echo "- **First Run:** ${{ steps.check-first-run.outputs.first_run }}"
-            echo "- **Data Cache:** ${{ steps.data-cache.outputs.cache-hit }}"
-            echo ""
-            echo "**Artifacts:**"
-            if [ "${{ job.status }}" = "success" ]; then
-              echo "-  Monitoring reports"
-              echo "-  Service logs"
-              echo "-  Data cached for next run"
-            else
-              echo "-  Monitoring reports (may be incomplete)"
-              echo "-  Service logs"
-              echo "-  Data cached for next run"
-              echo "-  Failure diagnostics"
-            fi
-            echo ""
-            echo "**Data Persistence:**"
-            if [ "${{ steps.check-first-run.outputs.first_run }}" = "true" ]; then
-              echo "-  First run - initializing datastore"
-            else
-              echo "-  Continuing from cached data"
-            fi
-          } >> $GITHUB_STEP_SUMMARY
+          echo "## AI Safety Monitor Run Summary" >> $GITHUB_STEP_SUMMARY
+          echo "- Type: ${{ github.event.inputs.run_type || 'standard' }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Branch: ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "- First run: ${{ steps.prepare-data.outputs.first_run }}" >> $GITHUB_STEP_SUMMARY

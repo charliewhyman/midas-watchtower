@@ -1,4 +1,4 @@
-name: AI Safety Monitor
+name: AI Safety Monitor - Metadata Only
 
 on:
   schedule:

@@ -15,9 +15,21 @@ logger = logging.getLogger(__name__)
 class ChangeDetector:
     """Detects changes between URL metadata snapshots with HTML and policy analysis"""
     
-    def __init__(self, history_file: Path):
+    def __init__(self, history_file: Path, settings: Optional[object] = None):
+        """Initialize ChangeDetector.
+
+        Args:
+            history_file: Path to history JSON file.
+            settings: Optional settings object (e.g. `MonitorSettings`) providing thresholds.
+        """
         self.history_file = history_file
         self.history: Dict[str, Any] = self._load_history()
+
+        # Load thresholds from settings if provided, otherwise use sensible defaults
+        self.content_size_threshold = getattr(settings, 'content_size_threshold', 1000)
+        self.word_count_threshold = getattr(settings, 'word_count_threshold', 50)
+        self.word_count_major_threshold = getattr(settings, 'word_count_major_threshold', 100)
+        self.policy_keyword_count_threshold = getattr(settings, 'policy_keyword_count_threshold', 2)
     
     def _load_history(self) -> Dict[str, Any]:
         """Load URL history from file"""
@@ -251,7 +263,7 @@ class ChangeDetector:
         # Content length changes
         current_length = current.content_length or 0
         previous_length = previous.get('content_length', 0)
-        if abs(current_length - previous_length) > 1000:  # Significant size change
+        if abs(current_length - previous_length) > self.content_size_threshold:  # Significant size change
             changes.append(ChangeDetails(
                 change_type='content_size_change',
                 source='http_metadata',
@@ -373,7 +385,7 @@ class ChangeDetector:
         # Word count changes
         current_words = current_content.get('word_count', 0)
         previous_words = previous_content.get('word_count', 0)
-        if abs(current_words - previous_words) > 50:  # Significant content change
+        if abs(current_words - previous_words) > self.word_count_threshold:  # Significant content change
             changes.append(ChangeDetails(
                 change_type='word_count_change',
                 source='content_analysis',
@@ -382,7 +394,7 @@ class ChangeDetector:
                     'new_count': current_words,
                     'change_percent': abs(current_words - previous_words) / max(previous_words, 1) * 100
                 },
-                severity='medium' if abs(current_words - previous_words) > 100 else 'low'
+                severity='medium' if abs(current_words - previous_words) > self.word_count_major_threshold else 'low'
             ))
         
         # Heading structure changes
@@ -447,7 +459,7 @@ class ChangeDetector:
             current_count = current_content.get(f'{keyword}_keyword_count', 0)
             previous_count = previous_content.get(f'{keyword}_keyword_count', 0)
             
-            if abs(current_count - previous_count) > 2:  # Significant keyword count change
+            if abs(current_count - previous_count) > self.policy_keyword_count_threshold:  # Significant keyword count change
                 changes.append(ChangeDetails(
                     change_type='policy_keyword_change',
                     source='policy_analysis',

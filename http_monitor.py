@@ -109,10 +109,13 @@ class HttpMonitor:
         """Extract basic HTTP metadata from HEAD response"""
         if response is None:
             return {}
-            
+        
+        # Normalize header keys to lowercase for consistent comparisons
+        headers = {k.lower(): v for k, v in dict(response.headers).items()}
+
         return {
             'status_code': response.status_code,
-            'headers': dict(response.headers),
+            'headers': headers,
             'final_url': str(response.url),
         }
     
@@ -471,4 +474,16 @@ class HttpMonitor:
     def close(self):
         """Close the session"""
         if self.session:
-            self.session.close()
+            # Normalize header keys to lowercase so saved history matches detector expectations
+            normalized_headers = {k.lower(): v for k, v in html_response.headers.items()}
+
+            metadata = UrlMetadata(
+                url=url,
+                timestamp=datetime.now(),
+                status_code=html_response.status_code,
+                headers=normalized_headers,
+                final_url=str(html_response.url),
+                html_metadata=html_metadata,
+                content_length=len(html_response.content) if html_response.content else 0,
+                response_time=time.monotonic() - start_time
+            )

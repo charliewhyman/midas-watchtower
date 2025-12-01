@@ -4,7 +4,7 @@ import os
 import json
 import socket
 from datetime import datetime
-from typing import Dict, List
+from typing import Dict, List, Any
 from pathlib import Path
 
 import requests
@@ -12,7 +12,6 @@ import requests
 from config import AppConfig
 from http_monitor import HttpMonitor
 from change_detector import ChangeDetector
-from changedetection_service import ChangedetectionService
 from sheets_reporter import GoogleSheetsReporter
 from github_reporter import GitHubReporter
 from scheduler import UrlScheduler
@@ -42,14 +41,11 @@ class MonitoringService:
         
         # Initialize components with first_run context
         self.http_monitor = HttpMonitor(self.config)
-        self.change_detector = ChangeDetector(Path(self.config.settings.history_file))
-        self.changedetection_service = ChangedetectionService(self.config)
+        # Pass settings through so ChangeDetector can use configurable thresholds
+        self.change_detector = ChangeDetector(Path(self.config.settings.history_file), settings=self.config.settings)
         self.sheets_reporter = GoogleSheetsReporter(self.config)
         self.gh_reporter = GitHubReporter()
         self.url_scheduler = UrlScheduler(self.config)  # Updated to use central interval
-        
-        # Initialize changedetection.io watches with robust retry logic
-        self._setup_changedetection_with_retry()
         
         logger.info("Monitoring service initialized successfully")
     
@@ -81,26 +77,6 @@ class MonitoringService:
             logger.info("FIRST_RUN environment variable set to true")
             return True
         
-        # Check for existing changedetection.io datastore
-        datastore_path = Path("data/datastore")
-        if datastore_path.exists():
-            datastore_files = list(datastore_path.glob("*.json"))
-            if datastore_files:
-                logger.info(f"Found {len(datastore_files)} datastore files")
-                
-                # Try to check if datastore has watches configured
-                for datastore_file in datastore_files:
-                    try:
-                        with open(datastore_file, 'r', encoding='utf-8') as f:
-                            data = json.load(f)
-                            if 'watches' in data and data['watches']:
-                                watch_count = len(data['watches'])
-                                logger.info(f"Datastore contains {watch_count} watches")
-                                return False
-                    except (json.JSONDecodeError, KeyError, Exception) as e:
-                        logger.debug(f"Could not parse {datastore_file}: {e}")
-                        continue
-        
         # Check for previous monitoring reports
         reports_path = Path("data/reports")
         if reports_path.exists():
@@ -128,235 +104,6 @@ class MonitoringService:
         logger.info("No existing monitoring data found - first run")
         return True
     
-    def _check_container_connectivity(self) -> bool:
-        """Check basic container connectivity before attempting API calls"""
-        logger.info("🔍 Checking container connectivity...")
-        
-        # Test DNS resolution
-        try:
-            ip = socket.gethostbyname('changedetection')
-            logger.info(f"📡 DNS resolution successful: changedetection -> {ip}")
-        except socket.gaierror as e:
-            logger.error(f"🔍 DNS resolution failed: {e}")
-            return False
-        
-        # Test basic TCP connectivity
-        try:
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.settimeout(10)
-            result = sock.connect_ex(('changedetection', 5000))
-            sock.close()
-            
-            if result == 0:
-                logger.info("🔌 TCP port 5000 is accessible")
-                return True
-            else:
-                logger.error(f"🔌 TCP port 5000 not accessible (error code: {result})")
-                return False
-        except Exception as e:
-            logger.error(f"🔌 TCP connectivity test failed: {e}")
-            return False
-    
-    def _wait_for_changedetection(self, timeout: int = 120) -> bool:
-        """Wait for changedetection.io to be fully ready with comprehensive diagnostics"""
-        logger.info(f"Waiting for changedetection.io to be ready (timeout: {timeout}s)...")
-        
-        start_time = time.monotonic()
-        attempt = 0
-        
-        while time.monotonic() - start_time < timeout:
-            attempt += 1
-            elapsed = int(time.monotonic() - start_time)
-            
-            try:
-                # Test basic connectivity first
-                response = requests.get(
-                    "http://changedetection:5000/api/v1/systeminfo",
-                    headers={'x-api-key': self.changedetection_service.api_key},
-                    timeout=10
-                )
-                
-                if response.status_code == 200:
-                    # Verify we get meaningful data back
-                    data = response.json()
-                    if 'version' in data:
-                        logger.info(f"changedetection.io ready after {attempt} attempts, version: {data.get('version')}")
-                        return True
-                    else:
-                        logger.warning(f"⚠️ Service responding but invalid response: {data}")
-                else:
-                    logger.warning(f"⚠️ Service returned HTTP {response.status_code} (attempt {attempt})")
-                    
-            except requests.exceptions.ConnectionError as e:
-                logger.warning(f"🔌 Connection error (attempt {attempt}, {elapsed}s): {e}")
-            except requests.exceptions.Timeout as e:
-                logger.warning(f"⏰ Request timeout (attempt {attempt}, {elapsed}s): {e}")
-            except requests.exceptions.RequestException as e:
-                logger.warning(f"🌐 Request exception (attempt {attempt}, {elapsed}s): {e}")
-            except Exception as e:
-                logger.warning(f"Unexpected error (attempt {attempt}, {elapsed}s): {e}")
-            
-            # Progressive backoff
-            sleep_time = min(2 ** min(attempt, 5), 10)  # Exponential backoff, max 10s
-            if time.monotonic() + sleep_time - start_time > timeout:
-                break  # Don't sleep if it would exceed timeout
-            time.sleep(sleep_time)
-        
-        logger.error(f"changedetection.io not ready after {timeout} seconds and {attempt} attempts")
-        return False
-    
-    def _sync_watches_with_config(self, max_retries: int, retry_delay: int):
-        """Ensure changedetection watches match config.yaml (create missing ones)"""
-        for attempt in range(max_retries):
-            try:
-                logger.info(f"Attempt {attempt + 1}/{max_retries}: Syncing changedetection.io watches with config.yaml...")
-                
-                # Get existing watches from changedetection.io
-                existing_watches = self.changedetection_service.get_existing_watches()
-                
-                if existing_watches is None:
-                    logger.error("Failed to retrieve existing watches (auth error)")
-                    raise Exception("Authentication failed")
-                
-                existing_urls = {watch.get('url') for watch in existing_watches.values() if watch.get('url')}
-                
-                logger.info(f"📊 Found {len(existing_urls)} existing watches in changedetection.io")
-                if existing_urls:
-                    logger.info(f"📋 Existing watches:")
-                    for url in sorted(existing_urls):
-                        logger.info(f"   - {url}")
-                
-                # Get URLs from config.yaml
-                config_urls = {url_config.url for url_config in self.config.url_configs}
-                logger.info(f"📊 Found {len(config_urls)} URLs in config.yaml")
-                if config_urls:
-                    logger.info(f"📋 Config URLs:")
-                    for url in sorted(config_urls):
-                        logger.info(f"   - {url}")
-                
-                # Find missing URLs that need to be added
-                missing_urls = config_urls - existing_urls
-                
-                if missing_urls:
-                    logger.info(f"📝 Found {len(missing_urls)} URLs from config.yaml not in changedetection.io")
-                    logger.info(f"🔧 Creating missing watches:")
-                    for url in sorted(missing_urls):
-                        logger.info(f"   - {url}")
-                    
-                    # Create watches for missing URLs using the public method
-                    created_count = 0
-                    failed_count = 0
-                    
-                    for url_config in self.config.url_configs:
-                        if url_config.url in missing_urls:
-                            logger.info(f"➕ Creating watch for: {url_config.url}")
-                            success = self.changedetection_service.create_watch(url_config, self.change_detector)
-                            
-                            if success:
-                                created_count += 1
-                                logger.info(f"✅ Successfully created watch for {url_config.url}")
-                            else:
-                                failed_count += 1
-                                logger.error(f"❌ Failed to create watch for {url_config.url}")
-                    
-                    logger.info(f"✅ Watch creation summary: {created_count} succeeded, {failed_count} failed")
-                    
-                    if failed_count > 0 and created_count == 0:
-                        raise Exception(f"Failed to create any watches ({failed_count} failures)")
-                        
-                else:
-                    logger.info(f"✅ All {len(config_urls)} config URLs already exist in changedetection.io")
-                    logger.info(f"🎯 No new watches needed - system is in sync!")
-                
-                return
-                
-            except Exception as e:
-                logger.warning(f"❌ Attempt {attempt + 1} failed: {e}")
-                logger.exception("Full traceback:")
-                if attempt < max_retries - 1:
-                    logger.info(f"⏳ Retrying in {retry_delay} seconds...")
-                    time.sleep(retry_delay)
-                else:
-                    logger.error("💥 All attempts to sync changedetection.io watches failed")
-                    logger.error("💡 Check the logs above for specific errors")
-                
-    def _setup_changedetection_with_retry(self, max_retries: int = 3, retry_delay: int = 15):
-        """Setup changedetection.io watches with robust retry logic"""
-        logger.info("Setting up changedetection.io integration...")
-        
-        # First, check basic container connectivity
-        if not self._check_container_connectivity():
-            logger.error("Basic container connectivity failed - cannot setup changedetection.io")
-            return
-        
-        # Wait for changedetection to be fully ready
-        if not self._wait_for_changedetection(timeout=120):
-            logger.error("Changedetection.io never became ready, skipping watch setup")
-            return
-        
-        # Always sync watches from config, not just on first run
-        logger.info("🔄 Syncing changedetection.io watches from config.yaml")
-        self._sync_watches_with_config(max_retries, retry_delay)
-    
-    def _setup_initial_watches_with_retry(self, max_retries: int, retry_delay: int):
-        """Setup initial watches with retry logic for first run"""
-        for attempt in range(max_retries):
-            try:
-                logger.info(f"🔄 Attempt {attempt + 1}/{max_retries}: Setting up initial changedetection.io watches...")
-                self.changedetection_service.setup_watches(self.change_detector)
-                logger.info("Initial changedetection.io watches setup completed successfully")
-                return
-                
-            except Exception as e:
-                logger.warning(f"Attempt {attempt + 1} failed: {e}")
-                if attempt < max_retries - 1:
-                    logger.info(f"Retrying in {retry_delay} seconds...")
-                    time.sleep(retry_delay)
-                    
-                    # Restart changedetection service between attempts if possible
-                    try:
-                        self._restart_changedetection_service()
-                    except Exception as restart_error:
-                        logger.warning(f"Could not restart changedetection service: {restart_error}")
-                else:
-                    logger.error("💥 All attempts to setup initial changedetection.io watches failed")
-                    logger.info("💡 You can setup watches manually via http://localhost:5000")
-    
-    def _restart_changedetection_service(self):
-        """Attempt to restart changedetection service"""
-        logger.info("🔄 Attempting to restart changedetection service...")
-        try:
-            # This would use docker compose in production, but for now just log
-            logger.info("📝 In production, this would restart the changedetection container")
-            # Example: subprocess.run(["docker", "compose", "restart", "changedetection"])
-            time.sleep(10)  # Wait for restart
-        except Exception as e:
-            logger.warning(f"Could not restart changedetection service: {e}")
-    
-    def _verify_existing_watches(self):
-        """Verify existing watches are working on subsequent runs"""
-        try:
-            # Check if we can access the watches API
-            watches = self.changedetection_service.get_existing_watches()
-            if watches:
-                logger.info(f"Found {len(watches)} existing watches in changedetection.io")
-                
-                # Test that at least one watch is accessible
-                if watches:
-                    first_watch_uuid = list(watches.keys())[0]
-                    try:
-                        watch_data = self.changedetection_service.get_watch(first_watch_uuid)
-                        if watch_data:
-                            logger.info(f"Successfully accessed watch {first_watch_uuid}")
-                        else:
-                            logger.warning(f"⚠️ Could not access watch data for {first_watch_uuid}")
-                    except Exception as e:
-                        logger.warning(f"⚠️ Error accessing watch {first_watch_uuid}: {e}")
-            else:
-                logger.warning("⚠️ No existing watches found in changedetection.io")
-        except Exception as e:
-            logger.warning(f"⚠️ Could not verify existing watches: {e}")
-    
     def run_cycle(self) -> MonitoringCycleStats:
         """Run one complete monitoring cycle"""
         cycle_id = f"cycle_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
@@ -378,14 +125,8 @@ class MonitoringService:
         sheets_results = {'successful': 0, 'failed': 0}
         
         try:
-            # Step 1: Check for content changes via changedetection.io
-            logger.info("Step 1: Checking changedetection.io for content changes...")
-            content_changes = self.changedetection_service.check_content_changes(self.change_detector)
-            all_changes.extend(content_changes)
-            logger.info(f"Content changes detected: {len(content_changes)}")
-            
-            # Step 2: Check for metadata changes on due URLs
-            logger.info("Step 2: Checking metadata changes...")
+            # Step 1: Check for metadata changes on due URLs
+            logger.info("Step 1: Checking metadata changes...")
             metadata_changes, checked_count = self._check_metadata_changes()
             all_changes.extend(metadata_changes)
             urls_checked = checked_count
@@ -551,7 +292,7 @@ class MonitoringService:
         else:
             logger.info("📊 No changes detected in this cycle")
     
-    def get_status(self) -> Dict[str, any]:
+    def get_status(self) -> Dict[str, Any]:
         """Get current service status"""
         scheduler_status = self.url_scheduler.get_status()
         
@@ -559,8 +300,7 @@ class MonitoringService:
             'first_run': self.first_run,
             'scheduler': scheduler_status,
             'sheets_connected': self.sheets_reporter.client is not None,
-            'changedetection_available': self._wait_for_changedetection(timeout=5),
-            'container_connectivity': self._check_container_connectivity(),
+            'container_connectivity': False,
             'total_monitored_urls': len(self.config.url_configs),
             'central_check_interval': self.config.central_check_interval,
             'polling_interval': self.config.scheduling.polling_interval,

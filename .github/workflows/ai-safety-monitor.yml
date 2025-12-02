@@ -47,7 +47,6 @@ jobs:
             source .github/scripts/config.sh
             set +a
           fi
-          echo "GOOGLE_SHEETS_USE_ENV=${GOOGLE_SHEETS_USE_ENV:-false}" >> $GITHUB_ENV
 
       - name: Setup Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -115,7 +114,15 @@ jobs:
           fi
 
           # Run the monitor once; keep mounts minimal for speed
+          # Pass GitHub Secrets directly into the container at runtime
+          # to avoid persisting the private key on the runner.
           $DOCKER_COMPOSE_CMD -p "$DOCKER_COMPOSE_PROJECT" run --rm \
+            -e GOOGLE_SHEETS_TYPE="${{ secrets.GOOGLE_SHEETS_TYPE }}" \
+            -e GOOGLE_SHEETS_PROJECT_ID="${{ secrets.GOOGLE_SHEETS_PROJECT_ID }}" \
+            -e GOOGLE_SHEETS_PRIVATE_KEY_ID="${{ secrets.GOOGLE_SHEETS_PRIVATE_KEY_ID }}" \
+            -e GOOGLE_SHEETS_PRIVATE_KEY="${{ secrets.GOOGLE_SHEETS_PRIVATE_KEY }}" \
+            -e GOOGLE_SHEETS_CLIENT_EMAIL="${{ secrets.GOOGLE_SHEETS_CLIENT_EMAIL }}" \
+            -e GOOGLE_SHEETS_CLIENT_ID="${{ secrets.GOOGLE_SHEETS_CLIENT_ID }}" \
             -v "$(pwd)/data:/app/data" \
             -v "$(pwd)/${REPORT_DIR:-data/reports}:/app/data/reports" \
             metadata-monitor python run_monitor.py

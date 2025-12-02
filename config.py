@@ -10,7 +10,6 @@ class MonitorSettings(BaseSettings):
     """Application settings with validation"""
     
     # Google Sheets Configuration
-    google_sheets_use_env: bool = False
     google_sheets_credentials_file: str = "google-sheets-credentials.json"
     
     # Google Sheets Environment Variables (for service account)
@@ -69,8 +68,6 @@ class MonitorSettings(BaseSettings):
         """Determine which credential source to use"""
         if self.should_use_github_actions_creds:
             return "github_actions"
-        elif self.google_sheets_use_env:
-            return "environment"
         else:
             return "file"
 

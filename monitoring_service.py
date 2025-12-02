@@ -193,7 +193,7 @@ class MonitoringService:
         
         if not due_urls:
             logger.info("No URLs due for metadata checking at this time")
-            return changes_detected, urls_checked
+                return changes_detected, urls_checked
         
         logger.info(f"Checking metadata for {len(due_urls)} due URLs")
         

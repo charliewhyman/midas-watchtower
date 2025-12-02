@@ -72,10 +72,21 @@ jobs:
       - name: Build and start services
         run: |
           source .github/scripts/logger.sh
-          
+
+          # Determine docker compose command (plugin or legacy) and export to env
+          if docker compose version >/dev/null 2>&1; then
+            DOCKER_COMPOSE_CMD='docker compose'
+          elif command -v docker-compose >/dev/null 2>&1; then
+            DOCKER_COMPOSE_CMD='docker-compose'
+          else
+            echo 'docker compose not available' >&2
+            exit 1
+          fi
+          echo "DOCKER_COMPOSE_CMD=$DOCKER_COMPOSE_CMD" >> $GITHUB_ENV
+
           log_info "Building metadata-monitor image with cache..."
           $DOCKER_COMPOSE_CMD build --progress plain --build-arg BUILDKIT_INLINE_CACHE=1 metadata-monitor
-          
+
           log_info "Starting metadata-monitor service..."
           $DOCKER_COMPOSE_CMD -p $DOCKER_COMPOSE_PROJECT up -d metadata-monitor
 

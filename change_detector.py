@@ -6,6 +6,7 @@ import hashlib
 from pathlib import Path
 import re
 from urllib.parse import urlparse, urlunparse
+import requests
 
 from models import UrlMetadata, HtmlMetadata, ChangeDetails, PolicyAlert
 import logging
@@ -31,6 +32,19 @@ class ChangeDetector:
         self.word_count_threshold = getattr(settings, 'word_count_threshold', 50)
         self.word_count_major_threshold = getattr(settings, 'word_count_major_threshold', 100)
         self.policy_keyword_count_threshold = getattr(settings, 'policy_keyword_count_threshold', 2)
+        # Linked document fetching settings
+        self.follow_linked_documents = getattr(settings, 'follow_linked_documents', True)
+        # Whitelist of content-types and file extensions to follow (useful to avoid fetching images etc)
+        self.linked_doc_content_types_whitelist = getattr(
+            settings, 'linked_doc_content_types_whitelist',
+            ['application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document']
+        )
+        self.linked_doc_ext_whitelist = getattr(settings, 'linked_doc_ext_whitelist', ['.pdf', '.doc', '.docx'])
+        self.linked_doc_timeout = getattr(settings, 'linked_doc_timeout', 15)
+        self.linked_doc_head_first = getattr(settings, 'linked_doc_head_first', True)
+
+        # Per-detection-run cache for linked-document fetches to avoid duplicate downloads
+        self._link_fetch_cache: Dict[str, Any] = {}
     
     def _load_history(self) -> Dict[str, Any]:
         """Load URL history from file"""
@@ -55,6 +69,8 @@ class ChangeDetector:
     def detect_metadata_changes(self, url: str, current_meta: UrlMetadata) -> List[ChangeDetails]:
         """Detect metadata changes between current and previous state including HTML"""
         changes = []
+        # Reset per-run cache for linked-doc fetching to ensure fresh per-detection values
+        self._link_fetch_cache = {}
         
         # Get previous metadata
         previous_meta = self._get_previous_metadata(url)
@@ -160,6 +176,7 @@ class ChangeDetector:
                 'structured_data_canonical': None,
                 'structured_data_hash': None,
                 'important_links': metadata.html_metadata.important_links,
+                'linked_documents': {},
                 'content_analysis': metadata.html_metadata.content_analysis,
                 'language': metadata.html_metadata.language,
                 'charset': metadata.html_metadata.charset,
@@ -174,9 +191,29 @@ class ChangeDetector:
                     canonical = self._canonicalize_json(sd)
                     serializable_meta['html_metadata']['structured_data_canonical'] = canonical
                     serializable_meta['html_metadata']['structured_data_hash'] = self._json_hash(canonical)
+                    
             except Exception:
                 # If anything fails, keep original structured_data and leave canonical fields None
                 pass
+            
+            # Follow and hash important linked documents (PDFs, docs) if enabled
+            if self.follow_linked_documents:
+                try:
+                    linked_docs = {}
+                    for link in (metadata.html_metadata.important_links or []):
+                        try:
+                            linked_docs[link] = self._hash_remote_resource(link)
+                        except Exception as e:
+                            linked_docs[link] = {'error': str(e)}
+
+                    serializable_meta['html_metadata']['linked_documents'] = linked_docs
+                except Exception:
+                    # Non-fatal: don't break saving metadata if link fetching fails
+                    logger.exception('Failed to fetch linked documents')
+            else:
+                # Explicitly record that linked-doc following is disabled
+                serializable_meta['html_metadata']['linked_documents'] = {}
+            
         
         # Use a normalized key to avoid duplicates due to minor URL form differences
         key_source = metadata.final_url or metadata.url
@@ -373,6 +410,38 @@ class ChangeDetector:
                 current.structured_data, previous.get('structured_data', {}), previous.get('html_metadata', {})
             )
             changes.extend(sd_changes)
+
+        # Linked documents (PDFs, policy downloads) changes
+        try:
+            # Normalize important_links to a list of URL strings for _detect_linked_document_changes
+            raw_links = current.important_links or []
+            normalized_links: List[str] = []
+            if isinstance(raw_links, dict):
+                # Try to extract URLs from dict values which may be lists of dicts/items
+                for k, v in raw_links.items():
+                    if isinstance(v, list):
+                        for item in v:
+                            if isinstance(item, dict) and 'url' in item:
+                                normalized_links.append(item['url'])
+                            elif isinstance(item, str):
+                                normalized_links.append(item)
+                    elif isinstance(v, str):
+                        normalized_links.append(v)
+                if not normalized_links:
+                    # Fallback to using dictionary keys as URLs
+                    normalized_links = list(raw_links.keys())
+            elif isinstance(raw_links, list):
+                normalized_links = [str(x) for x in raw_links]
+            else:
+                # unknown type: coerce to string list
+                normalized_links = [str(raw_links)]
+            
+            linked_doc_changes = self._detect_linked_document_changes(
+                normalized_links, previous.get('html_metadata', {})
+            )
+            changes.extend(linked_doc_changes)
+        except Exception:
+            logger.exception('Failed to detect linked document changes')
         
         # Content analysis changes
         content_changes = self._detect_content_changes(
@@ -381,6 +450,145 @@ class ChangeDetector:
         )
         changes.extend(content_changes)
         
+        return changes
+
+    def _hash_remote_resource(self, url: str, timeout: int = 15) -> Dict[str, Any]:
+        """Fetch a remote resource and return a small fingerprint (sha256, content-type, length, status).
+
+        Streams the response to avoid loading entire files into memory.
+        Returns a dict with keys: `hash`, `content_type`, `length`, `status_code` or `error` on failure.
+        """
+        # Use per-run cache to avoid duplicate downloads
+        if url in self._link_fetch_cache:
+            return self._link_fetch_cache[url]
+
+        try:
+            # Try HEAD first if configured to get quick content-type and length
+            head_info = None
+            content_type = None
+            status = None
+            headers = {}
+            if self.linked_doc_head_first:
+                try:
+                    head = requests.head(url, allow_redirects=True, timeout=min(10, timeout))
+                    status = head.status_code
+                    headers = {k.lower(): v for k, v in head.headers.items()}
+                    content_type = headers.get('content-type')
+                    head_info = head
+                except Exception:
+                    head_info = None
+
+            # Decide whether to fetch body based on whitelist and HEAD info
+            should_fetch_body = True
+            # If whitelist is enabled, and we have content-type from HEAD, check it
+            if self.linked_doc_content_types_whitelist and content_type:
+                # compare only media type portion
+                main_type = content_type.split(';', 1)[0].strip().lower()
+                if main_type not in [ct.lower() for ct in self.linked_doc_content_types_whitelist]:
+                    # If extension indicates allowed file, still allow
+                    parsed = urlparse(url)
+                    path = parsed.path or ''
+                    if not any(path.lower().endswith(ext) for ext in self.linked_doc_ext_whitelist):
+                        should_fetch_body = False
+
+            # If we don't have content-type from HEAD, but extension is disallowed, skip
+            if not content_type:
+                parsed = urlparse(url)
+                path = parsed.path or ''
+                if self.linked_doc_ext_whitelist and not any(path.lower().endswith(ext) for ext in self.linked_doc_ext_whitelist):
+                    should_fetch_body = False
+
+            if not should_fetch_body:
+                result = {
+                    'hash': None,
+                    'content_type': content_type,
+                    'length': int(headers.get('content-length') or 0),
+                    'status_code': status or (head_info.status_code if head_info else None),
+                    'skipped': True,
+                }
+                self._link_fetch_cache[url] = result
+                return result
+
+            resp = requests.get(url, stream=True, timeout=timeout, allow_redirects=True)
+            status = resp.status_code
+            headers = {k.lower(): v for k, v in resp.headers.items()}
+            if not content_type:
+                content_type = headers.get('content-type')
+
+            hasher = hashlib.sha256()
+            total = 0
+            for chunk in resp.iter_content(chunk_size=8192):
+                if chunk:
+                    hasher.update(chunk)
+                    total += len(chunk)
+
+            result = {
+                'hash': hasher.hexdigest(),
+                'content_type': content_type,
+                'length': total,
+                'status_code': status,
+            }
+            self._link_fetch_cache[url] = result
+            return result
+        except Exception as e:
+            logger.warning(f'Failed to fetch remote resource {url}: {e}')
+            result = {'error': str(e)}
+            self._link_fetch_cache[url] = result
+            return result
+
+    def _detect_linked_document_changes(self, current_links: List[str], previous_html_meta: Dict) -> List[ChangeDetails]:
+        """Detect changes in linked documents (PDFs, Terms-of-Service downloads).
+
+        Compares hashes for each link between current fetch and previous `html_metadata.linked_documents`.
+        """
+        # Respect settings: if following linked documents is disabled, skip detection
+        if not self.follow_linked_documents:
+            return []
+
+        changes: List[ChangeDetails] = []
+
+        # Fetch current linked docs fingerprints (uses per-run cache)
+        current_docs: Dict[str, Any] = {}
+        for link in current_links:
+            try:
+                current_docs[link] = self._hash_remote_resource(link, timeout=self.linked_doc_timeout)
+            except Exception as e:
+                current_docs[link] = {'error': str(e)}
+
+        previous_docs = previous_html_meta.get('linked_documents', {}) if previous_html_meta else {}
+
+        # Compare
+        all_links = set(list(current_docs.keys()) + list(previous_docs.keys()))
+        for link in all_links:
+            prev = previous_docs.get(link)
+            cur = current_docs.get(link)
+
+            prev_hash = prev.get('hash') if isinstance(prev, dict) else None
+            cur_hash = cur.get('hash') if isinstance(cur, dict) else None
+
+            # New or removed
+            if prev is None and cur is not None:
+                changes.append(ChangeDetails(
+                    change_type='linked_document_added',
+                    source='linked_documents',
+                    details={'link': link, 'new_hash': cur_hash, 'status_code': cur.get('status_code') if isinstance(cur, dict) else None},
+                    severity='medium'
+                ))
+            elif prev is not None and cur is None:
+                changes.append(ChangeDetails(
+                    change_type='linked_document_removed',
+                    source='linked_documents',
+                    details={'link': link, 'old_hash': prev_hash},
+                    severity='medium'
+                ))
+            elif prev_hash != cur_hash:
+                changes.append(ChangeDetails(
+                    change_type='linked_document_changed',
+                    source='linked_documents',
+                    details={'link': link, 'old_hash': prev_hash, 'new_hash': cur_hash, 'old_meta': prev, 'new_meta': cur},
+                    severity='high'
+                ))
+
         return changes
     
     def _detect_og_changes(self, current_og: Dict, previous_og: Dict) -> List[ChangeDetails]:

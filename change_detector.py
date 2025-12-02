@@ -137,7 +137,8 @@ class ChangeDetector:
             'url': metadata.url,
             'timestamp': metadata.timestamp.isoformat(),
             'status_code': metadata.status_code,
-            'headers': metadata.headers,
+            # Normalize headers to lowercase keys for consistent comparisons
+            'headers': {k.lower(): v for k, v in (metadata.headers or {}).items()},
             'final_url': metadata.final_url,
             'content_length': metadata.content_length,
             'response_time': metadata.response_time,
@@ -285,12 +286,15 @@ class ChangeDetector:
         """Detect significant header changes"""
         changes = []
         important_headers = ['last-modified', 'etag', 'content-type', 'content-length', 'cache-control']
-        
+        # Normalize header dicts to lowercase keys for reliable lookup
+        current_norm = {k.lower(): v for k, v in (current_headers or {}).items()}
+        previous_norm = {k.lower(): v for k, v in (previous_headers or {}).items()}
+
         for header in important_headers:
             header_lower = header.lower()
-            current_val = current_headers.get(header_lower)
-            previous_val = previous_headers.get(header_lower)
-            
+            current_val = current_norm.get(header_lower)
+            previous_val = previous_norm.get(header_lower)
+
             if current_val != previous_val:
                 changes.append(ChangeDetails(
                     change_type='header_change',
@@ -544,10 +548,13 @@ class ChangeDetector:
                 ))
         
         # 2. Last-modified header changed but minor content changes
-        current_last_modified = current_meta.headers.get('last-modified')
-        previous_last_modified = previous_meta.get('headers', {}).get('last-modified')
-        
-        if (current_last_modified != previous_last_modified and 
+        current_headers = {k.lower(): v for k, v in (current_meta.headers or {}).items()}
+        previous_headers = {k.lower(): v for k, v in (previous_meta.get('headers', {}) or {}).items()}
+
+        current_last_modified = current_headers.get('last-modified')
+        previous_last_modified = previous_headers.get('last-modified')
+
+        if (current_last_modified != previous_last_modified and
             abs(current_words - previous_words) < 50):  # Minor content change
             
             alerts.append(PolicyAlert(

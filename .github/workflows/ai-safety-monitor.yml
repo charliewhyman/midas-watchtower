@@ -86,7 +86,7 @@ jobs:
           echo "DOCKER_COMPOSE_CMD=$DOCKER_COMPOSE_CMD" >> $GITHUB_ENV
 
           log_info "Building metadata-monitor image with cache..."
-          $DOCKER_COMPOSE_CMD --progress build plain --build-arg BUILDKIT_INLINE_CACHE=1 metadata-monitor
+          $DOCKER_COMPOSE_CMD build --progress=plain --build-arg BUILDKIT_INLINE_CACHE=1 metadata-monitor
 
           log_info "Starting metadata-monitor service..."
           $DOCKER_COMPOSE_CMD -p $DOCKER_COMPOSE_PROJECT up -d metadata-monitor

@@ -133,11 +133,15 @@ class GoogleSheetsReporter:
                 logger.error(f"Missing required environment variables: {missing_vars}")
                 return None
             
+            # Initialize string for the private key before calling replace
+            private_key_raw = getattr(self.config.settings, 'google_sheets_private_key', '') or ''
+            private_key = private_key_raw.replace('\\n', '\n')
+
             service_account_info = {
                 "type": self.config.settings.google_sheets_type,
                 "project_id": self.config.settings.google_sheets_project_id,
                 "private_key_id": self.config.settings.google_sheets_private_key_id,
-                "private_key": self.config.settings.google_sheets_private_key.replace('\\n', '\n'),
+                "private_key": private_key,
                 "client_email": self.config.settings.google_sheets_client_email,
                 "client_id": self.config.settings.google_sheets_client_id,
                 "auth_uri": self.config.settings.google_sheets_auth_uri,

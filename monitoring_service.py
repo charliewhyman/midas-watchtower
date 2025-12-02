@@ -115,6 +115,8 @@ class MonitoringService:
             start_time=datetime.now(),
             first_run=self.first_run
         )
+        # Ensure numeric defaults for stats counters to avoid TypeErrors
+        stats.errors = int(stats.errors or 0)
         
         logger.info("=" * 60)
         logger.info(f"Starting monitoring cycle {cycle_id}")
@@ -179,7 +181,13 @@ class MonitoringService:
         Returns:
             Tuple of (changes_detected, urls_checked_count)
         """
-        due_urls = self.url_scheduler.get_due_urls()  # Updated to use central interval
+        raw_due = self.url_scheduler.get_due_urls()  # Updated to use central interval
+        try:
+            due_urls = list(raw_due) if raw_due is not None else []
+        except TypeError:
+            logger.warning("url_scheduler.get_due_urls() returned a non-iterable; treating as empty list")
+            due_urls = []
+
         changes_detected = []
         urls_checked = 0
         
@@ -301,7 +309,7 @@ class MonitoringService:
         return {
             'first_run': self.first_run,
             'scheduler': scheduler_status,
-            'sheets_connected': self.sheets_reporter.client is not None,
+            'sheets_connected': getattr(self.sheets_reporter, "client", None) is not None,
             'container_connectivity': False,
             'total_monitored_urls': len(self.config.url_configs),
             'central_check_interval': self.config.central_check_interval,

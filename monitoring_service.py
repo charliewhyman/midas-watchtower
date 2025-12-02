@@ -89,12 +89,16 @@ class MonitoringService:
             try:
                 with open(history_path, 'r', encoding='utf-8') as f:
                     history_data = json.load(f)
-                    # Support legacy format that used 'history' key as well as the current 'metadata_history'
-                    has_legacy_history = bool(history_data and history_data.get('history'))
-                    has_metadata_history = bool(history_data and history_data.get('metadata_history'))
-                    if has_legacy_history or has_metadata_history:
-                        logger.info("Found existing change history")
-                        return False
+                    # Ensure the loaded JSON is a dict before accessing keys.
+                    if not isinstance(history_data, dict):
+                        logger.debug("History file JSON is not an object/dict; ignoring for first-run detection")
+                    else:
+                        # Support legacy format that used 'history' key as well as the current 'metadata_history'
+                        has_legacy_history = bool(history_data.get('history'))
+                        has_metadata_history = bool(history_data.get('metadata_history'))
+                        if has_legacy_history or has_metadata_history:
+                            logger.info("Found existing change history")
+                            return False
             except (json.JSONDecodeError, Exception) as e:
                 logger.debug(f"Could not parse history file: {e}")
         

@@ -2,6 +2,7 @@
 from datetime import datetime
 from typing import Dict, Any, List, Optional
 import json
+import hashlib
 from pathlib import Path
 import re
 from urllib.parse import urlparse, urlunparse
@@ -155,6 +156,9 @@ class ChangeDetector:
                 'twitter_metadata': metadata.html_metadata.twitter_metadata,
                 'other_metadata': metadata.html_metadata.other_metadata,
                 'structured_data': metadata.html_metadata.structured_data,
+                # Also store a canonicalized JSON-LD string and its hash for reliable diffs
+                'structured_data_canonical': None,
+                'structured_data_hash': None,
                 'important_links': metadata.html_metadata.important_links,
                 'content_analysis': metadata.html_metadata.content_analysis,
                 'language': metadata.html_metadata.language,
@@ -163,6 +167,16 @@ class ChangeDetector:
                 'has_comments': metadata.html_metadata.has_comments,
                 'error': metadata.html_metadata.error,
             }
+            # Try to canonicalize structured data (JSON-LD) if present
+            try:
+                sd = metadata.html_metadata.structured_data
+                if sd:
+                    canonical = self._canonicalize_json(sd)
+                    serializable_meta['html_metadata']['structured_data_canonical'] = canonical
+                    serializable_meta['html_metadata']['structured_data_hash'] = self._json_hash(canonical)
+            except Exception:
+                # If anything fails, keep original structured_data and leave canonical fields None
+                pass
         
         # Use a normalized key to avoid duplicates due to minor URL form differences
         key_source = metadata.final_url or metadata.url
@@ -352,6 +366,13 @@ class ChangeDetector:
         # OpenGraph changes
         og_changes = self._detect_og_changes(current.og_metadata, previous.get('og_metadata', {}))
         changes.extend(og_changes)
+
+        # Structured data (JSON-LD) changes: canonicalize and diff semantically
+        if current.structured_data and previous.get('structured_data') is not None:
+            sd_changes = self._detect_structured_data_changes(
+                current.structured_data, previous.get('structured_data', {}), previous.get('html_metadata', {})
+            )
+            changes.extend(sd_changes)
         
         # Content analysis changes
         content_changes = self._detect_content_changes(
@@ -380,6 +401,130 @@ class ChangeDetector:
                     severity='medium'
                 ))
         
+        return changes
+
+    def _canonicalize_json(self, data: Any) -> str:
+        """Return a canonical JSON string for Python objects or JSON strings.
+
+        Canonicalization strategy:
+        - If input is a string, try to parse JSON.
+        - Recursively sort object keys to produce deterministic ordering.
+        - Render compact JSON with stable separators.
+        """
+        try:
+            if isinstance(data, str):
+                obj = json.loads(data)
+            else:
+                obj = data
+        except Exception:
+            # Fallback: return stringified value
+            return json.dumps(str(data), ensure_ascii=False)
+
+        def _sort(o):
+            if isinstance(o, dict):
+                return {k: _sort(o[k]) for k in sorted(o.keys())}
+            if isinstance(o, list):
+                return [_sort(i) for i in o]
+            return o
+
+        sorted_obj = _sort(obj)
+        return json.dumps(sorted_obj, ensure_ascii=False, separators=(',', ':'))
+
+    def _json_hash(self, canonical_str: str) -> str:
+        """Return SHA256 hex digest for the canonical JSON string."""
+        return hashlib.sha256(canonical_str.encode('utf-8')).hexdigest()
+
+    def _extract_model_card_info(self, sd_obj: Any) -> Dict[str, Any]:
+        """Walk structured-data and extract model-card / model-behavior relevant fields.
+
+        This is heuristic: it searches for dicts whose type/name suggests a model card
+        and collects a short set of fields likely to indicate behavioral/policy changes.
+        """
+        info = {}
+
+        def walk(o):
+            if isinstance(o, dict):
+                t = o.get('@type') or o.get('type') or ''
+                types = []
+                if isinstance(t, list):
+                    types = [str(x).lower() for x in t]
+                elif t:
+                    types = [str(t).lower()]
+
+                name_keys = set(k.lower() for k in o.keys())
+                # Heuristics: presence of 'model', 'modelcard', 'softwareapplication', or safety-related keys
+                if any('model' in ty or 'softwareapplication' in ty or 'modelcard' in ty for ty in types) or 'model' in name_keys or 'safety' in name_keys:
+                    for k in ['name', 'version', 'datePublished', 'releaseDate', 'description', 'identifier', 'license', 'evaluation', 'safety', 'safetyMitigations', 'allowedUse', 'prohibitedUse', 'metrics', 'usageGuidelines']:
+                        if k in o:
+                            info[k] = o[k]
+
+                for v in o.values():
+                    walk(v)
+            elif isinstance(o, list):
+                for i in o:
+                    walk(i)
+
+        walk(sd_obj)
+        return info
+
+    def _detect_structured_data_changes(self, current_sd: Any, previous_sd: Any, previous_html_meta: Dict) -> List[ChangeDetails]:
+        """Detect changes in JSON-LD / structured data and highlight model-card policy changes."""
+        changes = []
+
+        try:
+            current_canonical = self._canonicalize_json(current_sd)
+            previous_canonical = None
+
+            # previous_sd may be raw structured_data or may already include canonical/hash saved earlier
+            if isinstance(previous_sd, str):
+                previous_canonical = self._canonicalize_json(previous_sd)
+            elif isinstance(previous_sd, dict) and previous_html_meta:
+                # previous_sd was stored inside html_metadata structure
+                previous_canonical = previous_html_meta.get('structured_data_canonical') or self._canonicalize_json(previous_sd)
+            else:
+                previous_canonical = self._canonicalize_json(previous_sd)
+
+            current_hash = self._json_hash(current_canonical)
+            previous_hash = self._json_hash(previous_canonical) if previous_canonical is not None else None
+
+            if previous_hash != current_hash:
+                changes.append(ChangeDetails(
+                    change_type='structured_data_change',
+                    source='html_metadata',
+                    details={'old_hash': previous_hash, 'new_hash': current_hash},
+                    severity='medium'
+                ))
+
+                # Extract model-card info and diff field-level changes
+                try:
+                    cur_info = self._extract_model_card_info(json.loads(current_canonical))
+                except Exception:
+                    cur_info = self._extract_model_card_info(current_sd)
+
+                try:
+                    prev_info = {}
+                    if previous_canonical:
+                        prev_info = self._extract_model_card_info(json.loads(previous_canonical))
+                    else:
+                        prev_info = self._extract_model_card_info(previous_sd)
+                except Exception:
+                    prev_info = {}
+
+                # For each key in union, if changed, report model_card_change and mark policy alert
+                for k in set(list(cur_info.keys()) + list(prev_info.keys())):
+                    if cur_info.get(k) != prev_info.get(k):
+                        changes.append(ChangeDetails(
+                            change_type='model_card_change',
+                            source='structured_data',
+                            details={'field': k, 'old_value': prev_info.get(k), 'new_value': cur_info.get(k)},
+                            severity='high',
+                            policy_alert=True
+                        ))
+
+        except Exception:
+            # If anything goes wrong during structured-data diffing, don't crash detection
+            logger.exception('Failed to compare structured data')
+
         return changes
     
     def _detect_content_changes(self, current_content: Dict, previous_content: Dict) -> List[ChangeDetails]:

@@ -26,13 +26,27 @@ class UrlScheduler:
     
     def _initialize_schedules(self) -> None:
         """Initialize schedules from configuration using central interval"""
-        for url_config in self.config.url_configs:
-            self.schedules[url_config.url] = UrlSchedule(
-                url=url_config.url,
-                type=url_config.type,
-                priority=url_config.priority,
-                next_check=datetime.now()  # All URLs start as due for immediate check
-            )
+        # Support multiple config formats: prefer `url_configs`, fall back to `monitored_urls`
+        url_list = getattr(self.config, 'url_configs', None) or getattr(self.config, 'monitored_urls', [])
+
+        for url_config in url_list:
+            try:
+                url = getattr(url_config, 'url', None) or (url_config if isinstance(url_config, str) else None)
+                url_type = getattr(url_config, 'type', 'default') if not isinstance(url_config, str) else 'default'
+                priority = getattr(url_config, 'priority', 'medium') if not isinstance(url_config, str) else 'medium'
+
+                if not url:
+                    logger.debug(f"Skipping invalid URL config entry: {url_config}")
+                    continue
+
+                self.schedules[url] = UrlSchedule(
+                    url=url,
+                    type=url_type,
+                    priority=priority,
+                    next_check=datetime.now()  # All URLs start as due for immediate check
+                )
+            except Exception as e:
+                logger.exception(f"Failed to initialize schedule for entry {url_config}: {e}")
     
     def get_due_urls(self) -> List[Dict[str, Any]]:
         """Get URLs that are due for checking using central interval"""

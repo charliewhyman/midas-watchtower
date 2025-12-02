@@ -139,7 +139,8 @@ class ChangeDetector:
                     return entry
                 if canonical and (canonical == url or self._normalize_url(canonical) == norm_url):
                     return entry
-            except Exception:
+            except Exception as e:
+                logger.debug(f"Error matching historical entry for {url}: {e}")
                 continue
 
         return None
@@ -192,9 +193,9 @@ class ChangeDetector:
                     serializable_meta['html_metadata']['structured_data_canonical'] = canonical
                     serializable_meta['html_metadata']['structured_data_hash'] = self._json_hash(canonical)
                     
-            except Exception:
+            except Exception as e:
                 # If anything fails, keep original structured_data and leave canonical fields None
-                pass
+                logger.debug(f"Failed to canonicalize structured data for {url}: {e}")
             
             # Follow and hash important linked documents (PDFs, docs) if enabled
             if self.follow_linked_documents:
@@ -279,8 +280,8 @@ class ChangeDetector:
             else:
                 variants.add(self._normalize_url(urlunparse((scheme or 'http', f'www.{netloc}', path, '', '', ''))))
 
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"Failed to generate URL variants for {url}: {e}")
 
         return list(variants)
     
@@ -933,7 +934,8 @@ class ChangeDetector:
             with open(self.history_file, 'r', encoding='utf-8') as f:
                 content = f.read().strip()
                 return (not content or content in ('{}', 'null', '{"metadata_history": {}}'))
-        except Exception:
+        except Exception as e:
+            logger.exception(f"Error checking history file for first-run: {e}")
             return True
     
     def get_url_history(self, url: str) -> Optional[Dict]:

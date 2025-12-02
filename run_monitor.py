@@ -84,6 +84,19 @@ def detect_first_run():
         if report_files:
             logger.info(f"Found {len(report_files)} previous reports - continuing from previous run")
             return False
+
+    # Check change detector history file (saved by ChangeDetector)
+    history_file = Path("data/url_history.json")
+    if history_file.exists():
+        try:
+            with open(history_file, 'r', encoding='utf-8') as hf:
+                data = json.load(hf)
+                # If there is any metadata history recorded, treat as not first run
+                if data and (data.get('metadata_history') or data.get('history')):
+                    logger.info("Found existing change history file - continuing from previous run")
+                    return False
+        except Exception as e:
+            logger.debug(f"Could not parse history file {history_file}: {e}")
     
     # No existing data found
     logger.info("No existing datastore or reports found - first run detected")

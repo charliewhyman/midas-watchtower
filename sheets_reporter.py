@@ -31,14 +31,35 @@ class GoogleSheetsReporter:
             ]
             
             # Use the config to determine credential source
-            cred_source = self.config.settings.get_google_sheets_credential_source()
-            
-            if cred_source == "github_actions":
+            # Determine credential source defensively. Preference order:
+            # 1. Explicit method on settings (if present)
+            # 2. GitHub Actions environment variables
+            # 3. Environment-style settings in config
+            # 4. Service account file configured in settings
+            cred_source = None
+            try:
+                cred_source = getattr(self.config.settings, 'get_google_sheets_credential_source', lambda: None)()
+            except Exception:
+                cred_source = None
+
+            creds = None
+            if cred_source == 'github_actions' or (cred_source is None and os.getenv('GITHUB_ACTIONS') == 'true'):
+                # Try GitHub Actions secrets first if detected
                 creds = self._get_credentials_from_github_actions()
-            elif cred_source == "environment":
-                creds = self._get_credentials_from_env()
-            else:  # file
-                creds = self._get_credentials_from_file()
+
+            if creds is None and (cred_source == 'environment' or cred_source is None):
+                # Try environment/config-provided credentials (private key in settings)
+                try:
+                    creds = self._get_credentials_from_env()
+                except Exception:
+                    creds = None
+
+            if creds is None:
+                # Fallback to service account file if provided
+                try:
+                    creds = self._get_credentials_from_file()
+                except Exception:
+                    creds = None
             
             if creds:
                 self.client = gspread.authorize(creds)

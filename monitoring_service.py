@@ -121,7 +121,13 @@ class MonitoringService:
         logger.info("=" * 60)
         logger.info(f"Starting monitoring cycle {cycle_id}")
         logger.info(f"Run type: {'FIRST RUN 🆕' if self.first_run else 'CONTINUING RUN 🔄'}")
-        logger.info(f"Central check interval: {self.config.central_check_interval}s")
+        central_interval = getattr(self.config, 'central_check_interval', None)
+        # If not present directly on config, try nested settings or scheduling
+        if central_interval is None:
+            central_interval = getattr(getattr(self.config, 'settings', object()), 'central_check_interval', None)
+        if central_interval is None:
+            central_interval = getattr(getattr(self.config, 'scheduling', object()), 'central_check_interval', None)
+        logger.info(f"Central check interval: {central_interval}s")
         logger.info("=" * 60)
         
         all_changes: List[DetectedChange] = []
@@ -193,7 +199,7 @@ class MonitoringService:
         
         if not due_urls:
             logger.info("No URLs due for metadata checking at this time")
-                return changes_detected, urls_checked
+            return changes_detected, urls_checked
         
         logger.info(f"Checking metadata for {len(due_urls)} due URLs")
         
@@ -311,9 +317,9 @@ class MonitoringService:
             'scheduler': scheduler_status,
             'sheets_connected': getattr(self.sheets_reporter, "client", None) is not None,
             'container_connectivity': False,
-            'total_monitored_urls': len(self.config.url_configs),
-            'central_check_interval': self.config.central_check_interval,
-            'polling_interval': self.config.scheduling.polling_interval,
+            'total_monitored_urls': len(getattr(self.config, 'url_configs', getattr(self.config, 'monitored_urls', []))),
+            'central_check_interval': getattr(self.config, 'central_check_interval', None),
+            'polling_interval': getattr(getattr(self.config, 'scheduling', object()), 'polling_interval', None),
             'data_directories': {
                 'datastore': Path("data/datastore").exists(),
                 'reports': Path("data/reports").exists(),

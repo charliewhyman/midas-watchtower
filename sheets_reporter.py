@@ -121,7 +121,10 @@ class GoogleSheetsReporter:
             
             for key, default_value in optional_fields.items():
                 env_var = f"GOOGLE_SHEETS_{key.upper()}"
-                value = os.getenv(env_var, default_value)
+                # Treat empty string env vars as missing and fall back to default
+                value = os.getenv(env_var)
+                if not value:
+                    value = default_value
                 service_account_info[key] = value
             
             scopes = [
@@ -165,10 +168,11 @@ class GoogleSheetsReporter:
                 "private_key": private_key,
                 "client_email": self.config.settings.google_sheets_client_email,
                 "client_id": self.config.settings.google_sheets_client_id,
-                "auth_uri": self.config.settings.google_sheets_auth_uri,
-                "token_uri": self.config.settings.google_sheets_token_uri,
-                "auth_provider_x509_cert_url": self.config.settings.google_sheets_auth_provider_x509_cert_url,
-                "client_x509_cert_url": self.config.settings.google_sheets_client_x509_cert_url,
+                # Use defaults for URIs if settings provide falsy/empty values
+                "auth_uri": self.config.settings.google_sheets_auth_uri or 'https://accounts.google.com/o/oauth2/auth',
+                "token_uri": self.config.settings.google_sheets_token_uri or 'https://oauth2.googleapis.com/token',
+                "auth_provider_x509_cert_url": self.config.settings.google_sheets_auth_provider_x509_cert_url or 'https://www.googleapis.com/oauth2/v1/certs',
+                "client_x509_cert_url": self.config.settings.google_sheets_client_x509_cert_url or f"https://www.googleapis.com/robot/v1/metadata/x509/{(self.config.settings.google_sheets_client_email or '').replace('@', '%40')}",
             }
             
             scopes = [

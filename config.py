@@ -64,12 +64,25 @@ class MonitorSettings(BaseSettings):
         
         return all(os.getenv(secret) for secret in required_secrets)
     
+    def should_use_env_creds(self) -> bool:
+        """Detect if service-account fields are present in environment/config for env-based creds."""
+        required_fields = [
+            'google_sheets_type',
+            'google_sheets_project_id',
+            'google_sheets_private_key_id',
+            'google_sheets_private_key',
+            'google_sheets_client_email',
+            'google_sheets_client_id',
+        ]
+        return all(bool(getattr(self, f, None)) for f in required_fields)
+
     def get_google_sheets_credential_source(self) -> str:
-        """Determine which credential source to use"""
+        """Determine which credential source to use: 'github_actions', 'environment', or 'file'."""
         if self.should_use_github_actions_creds:
             return "github_actions"
-        else:
-            return "file"
+        if self.should_use_env_creds():
+            return "environment"
+        return "file"
 
     class Config:
         env_file = ".env"
@@ -105,7 +118,7 @@ class AppConfig:
         try:
             if self.config_path.exists():
                 with open(self.config_path, 'r') as f:
-                    config_data = yaml.safe_load(f)
+                    config_data = yaml.safe_load(f) or {}
                 self._parse_config(config_data)
             else:
                 self._create_default_config()
@@ -190,7 +203,11 @@ class AppConfig:
             'polling_interval': self.scheduling.polling_interval,
             'priority_distribution': priority_counts,
             'type_distribution': type_counts,
-            'sheets_configured': self.settings.get_google_sheets_credential_source() != "file"
+            'sheets_credential_source': self.settings.get_google_sheets_credential_source(),
+            'sheets_configured': (
+                self.settings.get_google_sheets_credential_source() in ('github_actions', 'environment')
+                or Path(self.settings.google_sheets_credentials_file).exists()
+            )
         }
 
 

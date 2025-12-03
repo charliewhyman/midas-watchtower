@@ -40,9 +40,10 @@ jobs:
         id: prepare-data
         run: |
           mkdir -p data/datastore data/reports data/logs
-          # Ensure the runner and any containers can write to these dirs
           chmod -R 0777 data || true
-          if [ -s data/url_history.json ]; then
+          
+          # Check for the correct history file that the Python code uses
+          if [ -s data/metadata_history.json ] || [ -s data/url_history.json ]; then
             echo "FIRST_RUN=false" >> $GITHUB_ENV
             echo "first_run=false" >> $GITHUB_OUTPUT
           else

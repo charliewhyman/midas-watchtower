@@ -390,6 +390,25 @@ class GoogleSheetsReporter:
                 elif change_detail.change_type == 'redirect_change':
                     details = change_detail.details
                     change_details.append(f"Redirect: {details.get('old_url')}→{details.get('new_url')}")
+                elif change_detail.change_type in ('linked_document_added', 'linked_document_removed', 'linked_document_changed'):
+                    details = change_detail.details or {}
+                    link = details.get('link') or details.get('url') or 'unknown'
+                    if change_detail.change_type == 'linked_document_added':
+                        status = details.get('status_code') or details.get('status') or ''
+                        ctype = details.get('content_type') or ''
+                        change_details.append(f"Linked doc added: {link} (status:{status} type:{ctype})")
+                    elif change_detail.change_type == 'linked_document_removed':
+                        old_hash = details.get('old_hash') or ''
+                        change_details.append(f"Linked doc removed: {link} (old_hash:{old_hash})")
+                    else:
+                        # changed
+                        old_hash = details.get('old_hash') or ''
+                        new_hash = details.get('new_hash') or ''
+                        change_details.append(f"Linked doc changed: {link} (old:{old_hash} new:{new_hash})")
+                
+                elif change_detail.change_type == 'structured_data_change':
+                    details = change_detail.details
+                    change_details.append(f"Structured data change: {details.get('old_hash')}→{details.get('new_hash')}")
             
             # Get metadata information
             metadata = change.metadata.dict() if change.metadata else {}

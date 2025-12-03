@@ -27,6 +27,15 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Restore data cache
+        uses: actions/cache@v4
+        id: data-cache
+        with:
+          path: data/
+          key: monitoring-data-${{ runner.os }}-v1
+          restore-keys: |
+            monitoring-data-${{ runner.os }}-v1
+
       - name: Ensure data directories exist and set FIRST_RUN
         id: prepare-data
         run: |

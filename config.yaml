@@ -3,7 +3,7 @@ central_check_interval: 3600
 monitored_urls:
   # OpenAI URLs (en-US)
 
-  - url: "https://openai.com/en-US/policies/usage-policies/"
+  - url: "https://openai.com/policies/usage-policies/"
     type: "usage policy"
     priority: "medium"
 
@@ -15,7 +15,7 @@ monitored_urls:
     type: "policy overview"
     priority: "high"
 
-  - url: "https://openai.com/en-US/policies/how-chatgpt-and-our-foundation-models-are-developed/"
+  - url: "https://openai.com/policies/how-chatgpt-and-our-foundation-models-are-developed/"
     type: "development policy"
     priority: "medium"
 
@@ -66,15 +66,15 @@ monitored_urls:
     priority: "medium"
   
   # DeepSeek URLs
-  - url: "https://cdn.deepseek.com/policies/en-US/deepseek-privacy-policy.html"
+  - url: "https://cdn.deepseek.com/policies/deepseek-privacy-policy.html"
     type: "privacy policy"
     priority: "medium"
 
-  - url: "https://cdn.deepseek.com/policies/en-US/model-algorithm-disclosure.html"
+  - url: "https://cdn.deepseek.com/policies/model-algorithm-disclosure.html"
     type: "documentation"
     priority: "low"
 
-  - url: "https://cdn.deepseek.com/policies/en-US/deepseek-terms-of-use.html"
+  - url: "https://cdn.deepseek.com/policies/deepseek-terms-of-use.html"
     type: "terms of service"
     priority: "medium"
 
@@ -92,15 +92,15 @@ monitored_urls:
     priority: "low"
 
 # Microsoft URLs
-  - url: "https://www.microsoft.com/en-us/research/project/ai-safety/"
+  - url: "https://www.microsoft.com/research/project/ai-safety/"
     type: "research"
     priority: "medium"
 
-  - url: "https://www.microsoft.com/en-us/microsoft-copilot/for-individuals/termsofuse"
+  - url: "https://www.microsoft.com/microsoft-copilot/for-individuals/termsofuse"
     type: "terms of use"
     priority: "high"
 
-  - url: "https://www.microsoft.com/en-ca/servicesagreement/"
+  - url: "https://www.microsoft.com/servicesagreement/"
     type: "privacy policy"
     priority: "high"
 
@@ -108,11 +108,11 @@ monitored_urls:
     type: "copyright policy"
     priority: "medium"
 
-  - url: "https://www.microsoft.com/en-us/ai/principles-and-approach"
+  - url: "https://www.microsoft.com/ai/principles-and-approach"
     type: "safety principles"
     priority: "low"
 
-  - url: "https://www.microsoft.com/en-us/ai/responsible-ai"
+  - url: "https://www.microsoft.com/ai/responsible-ai"
     type: "responsible AI"
     priority: "low"
 
@@ -123,10 +123,6 @@ monitored_urls:
 
   - url: "https://gemini.google/policy-guidelines/"
     type: "policy"
-    priority: "medium"
-
-  - url: "https://safety.google/intl/en-US_ALL/products/gemini/"
-    type: "safety overview"
     priority: "medium"
 
   - url: "https://ai.google.dev/gemini-api/docs/safety-settings"
@@ -141,7 +137,7 @@ monitored_urls:
     type: "safety policy"
     priority: "low"
 
-  - url: "https://safety.google/intl/en-GB_ALL/safety/saif/"
+  - url: "https://safety.google/safety/saif/"
     type: "safety framework"
     priority: "high"
 

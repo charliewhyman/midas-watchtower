@@ -40,7 +40,7 @@ jobs:
         id: prepare-data
         run: |
           mkdir -p data/datastore data/reports data/logs
-          chmod -R 0777 data || true
+          chmod -R u+rw data
           
           # Check for the correct history file that the Python code uses
           if [ -s data/metadata_history.json ] || [ -s data/url_history.json ]; then

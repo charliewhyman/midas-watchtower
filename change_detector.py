@@ -208,9 +208,9 @@ class ChangeDetector:
                             linked_docs[link] = {'error': str(e)}
 
                     serializable_meta['html_metadata']['linked_documents'] = linked_docs
-                except Exception:
+                except Exception as e:
                     # Non-fatal: don't break saving metadata if link fetching fails
-                    logger.exception('Failed to fetch linked documents')
+                    logger.exception(f'Failed to fetch linked documents: {e}')
             else:
                 # Explicitly record that linked-doc following is disabled
                 serializable_meta['html_metadata']['linked_documents'] = {}
@@ -220,7 +220,8 @@ class ChangeDetector:
         key_source = metadata.final_url or metadata.url
         try:
             key = self._normalize_url(key_source)
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Failed to normalize key source '{key_source}', falling back to raw url: {e}")
             key = url
 
         self.history['metadata_history'][key] = serializable_meta
@@ -441,8 +442,8 @@ class ChangeDetector:
                 normalized_links, previous.get('html_metadata', {})
             )
             changes.extend(linked_doc_changes)
-        except Exception:
-            logger.exception('Failed to detect linked document changes')
+        except Exception as e:
+            logger.exception(f'Failed to detect linked document changes: {e}')
         
         # Content analysis changes
         content_changes = self._detect_content_changes(
@@ -476,7 +477,8 @@ class ChangeDetector:
                     headers = {k.lower(): v for k, v in head.headers.items()}
                     content_type = headers.get('content-type')
                     head_info = head
-                except Exception:
+                except Exception as e:
+                    logger.debug(f"HEAD request failed for linked doc {url}: {e}")
                     head_info = None
 
             # Decide whether to fetch body based on whitelist and HEAD info
@@ -625,8 +627,9 @@ class ChangeDetector:
                 obj = json.loads(data)
             else:
                 obj = data
-        except Exception:
-            # Fallback: return stringified value
+        except Exception as e:
+            # Fallback: return stringified value and log debug info
+            logger.debug(f"Failed to parse data for canonicalization: {e}")
             return json.dumps(str(data), ensure_ascii=False)
 
         def _sort(o):
@@ -707,7 +710,8 @@ class ChangeDetector:
                 # Extract model-card info and diff field-level changes
                 try:
                     cur_info = self._extract_model_card_info(json.loads(current_canonical))
-                except Exception:
+                except Exception as e:
+                    logger.debug(f"Failed to parse current canonical structured data JSON: {e}")
                     cur_info = self._extract_model_card_info(current_sd)
 
                 try:
@@ -716,7 +720,8 @@ class ChangeDetector:
                         prev_info = self._extract_model_card_info(json.loads(previous_canonical))
                     else:
                         prev_info = self._extract_model_card_info(previous_sd)
-                except Exception:
+                except Exception as e:
+                    logger.debug(f"Failed to parse previous structured data JSON: {e}")
                     prev_info = {}
 
                 # For each key in union, if changed, report model_card_change and mark policy alert
@@ -730,9 +735,9 @@ class ChangeDetector:
                             policy_alert=True
                         ))
 
-        except Exception:
+        except Exception as e:
             # If anything goes wrong during structured-data diffing, don't crash detection
-            logger.exception('Failed to compare structured data')
+            logger.exception(f'Failed to compare structured data: {e}')
 
         return changes
     

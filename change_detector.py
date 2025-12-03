@@ -339,9 +339,20 @@ class ChangeDetector:
         """Detect significant header changes"""
         changes = []
         important_headers = ['last-modified', 'etag', 'content-type', 'content-length', 'cache-control']
+
         # Normalize header dicts to lowercase keys for reliable lookup
         current_norm = {k.lower(): v for k, v in (current_headers or {}).items()}
         previous_norm = {k.lower(): v for k, v in (previous_headers or {}).items()}
+
+        # Remove well-known volatile headers that change on every request
+        volatile_ignore = {
+            'date', 'server', 'set-cookie', 'x-request-id', 'via', 'connection',
+            'x-runtime', 'x-served-by', 'x-cache', 'x-cdn', 'transfer-encoding'
+        }
+
+        for h in volatile_ignore:
+            current_norm.pop(h, None)
+            previous_norm.pop(h, None)
 
         for header in important_headers:
             header_lower = header.lower()
@@ -359,7 +370,7 @@ class ChangeDetector:
                     },
                     severity='low' if header == 'last-modified' else 'medium'
                 ))
-        
+
         return changes
     
     def _detect_html_metadata_changes(self, url: str, current: HtmlMetadata, previous: Dict) -> List[ChangeDetails]:

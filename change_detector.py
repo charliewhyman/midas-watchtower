@@ -954,7 +954,7 @@ class ChangeDetector:
             logger.exception(f"Error checking history file for first-run: {e}")
             return True
     
-    def get_url_history(self, url: str) -> Optional[Dict]:
+    def get_metadata_history(self, url: str) -> Optional[Dict]:
         """Get complete history for a URL"""
         return self.history.get('metadata_history', {}).get(url)
     

@@ -32,21 +32,25 @@ jobs:
         id: data-cache
         with:
           path: data/
-          key: monitoring-data-${{ runner.os }}-v1
+          key: monitoring-data-${{ runner.os }}-${{ hashFiles('data/metadata_history.json') }}-v2
           restore-keys: |
+            monitoring-data-${{ runner.os }}-v2
             monitoring-data-${{ runner.os }}-v1
 
       - name: Ensure data directories exist and set FIRST_RUN
         id: prepare-data
         run: |
           mkdir -p data/datastore data/reports data/logs
-          chmod -R u+rw data
-          
+          chmod -R u+rw data || true
+
           # Check for the correct history file that the Python code uses
-          if [ -s data/metadata_history.json ] || [ -s data/url_history.json ]; then
+          if [ -s data/metadata_history.json ]; then
+            echo "✓ History file found with data"
+            ls -lh data/metadata_history.json
             echo "FIRST_RUN=false" >> $GITHUB_ENV
             echo "first_run=false" >> $GITHUB_OUTPUT
           else
+            echo "✗ No history file found - this is a first run"
             echo "FIRST_RUN=true" >> $GITHUB_ENV
             echo "first_run=true" >> $GITHUB_OUTPUT
           fi
@@ -140,12 +144,30 @@ jobs:
             -v "$(pwd)/data:/app/data" \
             -v "$(pwd)/${REPORT_DIR:-data/reports}:/app/data/reports" \
             metadata-monitor python run_monitor.py
+
+      - name: Verify history file after run
+        if: always()
+        run: |
+          echo "=== Post-run history file check ==="
+          if [ -f data/metadata_history.json ]; then
+            echo "✓ History file exists"
+            echo "  Size: $(stat -f%z data/metadata_history.json 2>/dev/null || stat -c%s data/metadata_history.json)"
+            echo "  Lines: $(wc -l < data/metadata_history.json)"
+            echo "  Last modified: $(stat -f%Sm data/metadata_history.json 2>/dev/null || stat -c%y data/metadata_history.json)"
+            echo ""
+            echo "First 3 lines:"
+            head -n 3 data/metadata_history.json || true
+          else
+            echo "✗ History file missing after run!"
+            echo "Contents of data directory:"
+            ls -la data/ || true
+          fi
+
       - name: Save service logs
         if: always()
         run: |
           mkdir -p "$DOCKER_LOG_DIR"
           docker compose -p "$DOCKER_COMPOSE_PROJECT" logs metadata-monitor > "$DOCKER_LOG_DIR/metadata-monitor.log" 2>&1 || true
-          docker compose -p "$DOCKER_COMPOSE_PROJECT" logs metadata-monitor > "${{ env.DOCKER_LOG_DIR || 'docker-logs' }}/metadata-monitor.log" 2>&1 || true
 
       - name: Upload monitoring reports
         if: always()
@@ -155,6 +177,7 @@ jobs:
           path: data/reports/
           retention-days: 30
           if-no-files-found: warn
+
       - name: Upload service logs
         if: always()
         uses: actions/upload-artifact@v4
@@ -163,6 +186,15 @@ jobs:
           path: ${{ env.DOCKER_LOG_DIR }}
           retention-days: 7
           if-no-files-found: ignore
+
+      - name: Upload data directory for debugging
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: data-directory-${{ github.run_number }}
+          path: data/
+          retention-days: 7
+          if-no-files-found: warn
 
       - name: Cleanup services (preserve data)
         if: always()
@@ -173,6 +205,28 @@ jobs:
         if: always()
         run: |
           echo "## AI Safety Monitor Run Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Run Details:**" >> $GITHUB_STEP_SUMMARY
           echo "- Type: ${{ github.event.inputs.run_type || 'standard' }}" >> $GITHUB_STEP_SUMMARY
           echo "- Branch: ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
           echo "- First run: ${{ steps.prepare-data.outputs.first_run }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Run number: ${{ github.run_number }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          if [ -f data/metadata_history.json ]; then
+            echo "**History File Status:** ✓ Present" >> $GITHUB_STEP_SUMMARY
+            echo "- Size: $(stat -f%z data/metadata_history.json 2>/dev/null || stat -c%s data/metadata_history.json) bytes" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "**History File Status:** ✗ Missing" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          if [ -f data/reports/cycle_*.json ]; then
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "**Latest Report:**" >> $GITHUB_STEP_SUMMARY
+            LATEST_REPORT=$(ls -t data/reports/cycle_*.json 2>/dev/null | head -1)
+            if [ -n "$LATEST_REPORT" ]; then
+              echo '```json' >> $GITHUB_STEP_SUMMARY
+              cat "$LATEST_REPORT" >> $GITHUB_STEP_SUMMARY
+              echo '```' >> $GITHUB_STEP_SUMMARY
+            fi
+          fi

@@ -86,7 +86,7 @@ def detect_first_run():
             return False
 
     # Check change detector history file (saved by ChangeDetector)
-    history_file = Path("data/url_history.json")
+    history_file = Path("data/metadata_history.json")
     if history_file.exists():
         try:
             with open(history_file, 'r', encoding='utf-8') as hf:

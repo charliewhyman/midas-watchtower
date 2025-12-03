@@ -38,7 +38,7 @@ class MonitorSettings(BaseSettings):
     # File Paths
     data_dir: str = "data"
     logs_dir: str = "logs"
-    history_file: str = "data/url_history.json"
+    history_file: str = "data/metadata_history.json"
     config_file: str = "config.yaml"
     
     @property

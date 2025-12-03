@@ -10,6 +10,7 @@ import uvicorn
 from monitoring_service import MonitoringService
 from config import ConfigurationError
 import logging
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +35,7 @@ def get_monitor_service() -> MonitoringService:
         except ConfigurationError as e:
             logger.error(f"Configuration error: {e}")
             raise HTTPException(status_code=500, detail=f"Configuration error: {e}")
-        except Exception as e:
+        except (RuntimeError, OSError, ValueError, TypeError) as e:
             logger.error(f"Failed to initialize monitoring service: {e}")
             raise HTTPException(status_code=500, detail=f"Service initialization failed: {e}")
     return _monitor_service
@@ -101,7 +102,7 @@ async def manual_check(background_tasks: BackgroundTasks, service: MonitoringSer
             "timestamp": datetime.now().isoformat()
         }
         
-    except Exception as e:
+    except (RuntimeError, OSError, ValueError, TypeError) as e:
         logger.error(f"Manual check failed: {e}")
         raise HTTPException(status_code=500, detail=f"Manual check failed: {e}")
 
@@ -117,7 +118,7 @@ async def status(service: MonitoringService = Depends(get_monitor_service)):
             **status_info,
             "central_check_interval": service.config.central_check_interval
         }
-    except Exception as e:
+    except (AttributeError, TypeError, KeyError, ValueError) as e:
         logger.error(f"Status check failed: {e}")
         raise HTTPException(status_code=500, detail=f"Status check failed: {e}")
 
@@ -150,7 +151,7 @@ async def list_urls(service: MonitoringService = Depends(get_monitor_service)):
             "central_check_interval": service.config.central_check_interval,
             "timestamp": datetime.now().isoformat()
         }
-    except Exception as e:
+    except (AttributeError, TypeError, KeyError, ValueError) as e:
         logger.error(f"Failed to list URLs: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to list URLs: {e}")
 
@@ -169,7 +170,7 @@ async def get_config(service: MonitoringService = Depends(get_monitor_service)):
                 "low": len([u for u in service.config.url_configs if u.priority == "low"])
             }
         }
-    except Exception as e:
+    except (AttributeError, TypeError, KeyError, ValueError) as e:
         logger.error(f"Failed to get config: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to get config: {e}")
 
@@ -225,7 +226,7 @@ def main():
             access_log=True
         )
         
-    except Exception as e:
+    except (RuntimeError, OSError) as e:
         logger.error(f"Application failed to start: {e}")
         if os.getenv('GITHUB_ACTIONS') == 'true':
             exit(1)

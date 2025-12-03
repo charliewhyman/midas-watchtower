@@ -96,7 +96,7 @@ class HttpMonitor:
                 error=str(e),
                 final_url=url
             )
-        except Exception as e:
+        except (RuntimeError, TypeError, ValueError, OSError) as e:
             logger.error(f"Unexpected error checking {url}: {e}")
             return UrlMetadata(
                 url=url,
@@ -182,7 +182,7 @@ class HttpMonitor:
                 has_comments=self._has_comments(soup),
             )
             
-        except Exception as e:
+        except (ValueError, TypeError, RuntimeError, OSError) as e:
             logger.error(f"Error parsing HTML for {url}: {e}")
             return HtmlMetadata(
                 url=url,
@@ -273,7 +273,7 @@ class HttpMonitor:
                 if script.string:
                     data = json.loads(script.string)
                     structured_data['json_ld'].append(data)
-            except (json.JSONDecodeError, Exception) as e:
+            except (json.JSONDecodeError, TypeError, ValueError) as e:
                 logger.debug(f"Failed to parse JSON-LD data: {e}")
         
         # Basic microdata extraction
@@ -300,7 +300,7 @@ class HttpMonitor:
         try:
             from urllib.parse import urlparse
             base_domain = urlparse(base_url).netloc
-        except Exception:
+        except (ValueError, TypeError):
             base_domain = None
         
         social_domains = ['facebook.com', 'twitter.com', 'linkedin.com', 'instagram.com', 'youtube.com']
@@ -477,5 +477,5 @@ class HttpMonitor:
             if self.session:
                 self.session.close()
                 logger.info("HTTP session closed")
-        except Exception as e:
+        except (OSError, RuntimeError) as e:
             logger.exception(f"Error closing HTTP session: {e}")

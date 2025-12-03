@@ -99,7 +99,7 @@ class MonitoringService:
                         if has_legacy_history or has_metadata_history:
                             logger.info("Found existing change history")
                             return False
-            except (json.JSONDecodeError, Exception) as e:
+            except (json.JSONDecodeError, ValueError, TypeError, OSError) as e:
                 logger.debug(f"Could not parse history file: {e}")
         
         # No existing data found - this is the first run
@@ -169,7 +169,7 @@ class MonitoringService:
             
             return stats
             
-        except Exception as e:
+        except (RuntimeError, OSError, ValueError) as e:
             logger.error(f"Monitoring cycle failed with error: {e}")
             logger.exception("Full traceback:")
             stats.errors += 1
@@ -177,7 +177,7 @@ class MonitoringService:
             # Still try to generate error report
             try:
                 self._generate_reports(all_changes, stats)
-            except Exception as report_error:
+            except (OSError, RuntimeError) as report_error:
                 logger.error(f"Failed to generate error report: {report_error}")
             return stats
     
@@ -234,7 +234,7 @@ class MonitoringService:
                 # Small delay between requests to be respectful
                 time.sleep(0.5)
                 
-            except Exception as e:
+            except (requests.RequestException, RuntimeError, ValueError, TypeError, OSError) as e:
                 logger.error(f"Error checking metadata for {url}: {e}")
                 # Mark as checked but schedule retry sooner
                 self.url_scheduler.mark_url_as_checked(url, success=False)
@@ -242,7 +242,7 @@ class MonitoringService:
         # Save history after processing all URLs
         try:
             self.change_detector.save_history()
-        except Exception as e:
+        except (OSError, IOError) as e:
             logger.error(f"Error saving change history: {e}")
         
         return changes_detected, urls_checked
@@ -255,7 +255,7 @@ class MonitoringService:
             results['successful'] = successful
             results['failed'] = failed
             return results
-        except Exception as e:
+        except (RuntimeError, OSError, ValueError) as e:
             logger.error(f"Batch logging to Sheets failed: {e}")
             # Fallback: count all as failed
             results['failed'] = len(changes)
@@ -275,7 +275,7 @@ class MonitoringService:
             # GitHub Actions summary
             self.gh_reporter.print_github_summary(changes, stats)
             
-        except Exception as e:
+        except (OSError, RuntimeError) as e:
             logger.error(f"Error generating reports: {e}")
             # Don't raise the exception - reports are secondary to monitoring
     

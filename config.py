@@ -122,7 +122,7 @@ class AppConfig:
                 self._parse_config(config_data)
             else:
                 self._create_default_config()
-        except Exception as e:
+        except (OSError, yaml.YAMLError, ValueError) as e:
             raise ConfigurationError(f"Failed to load config from {self.config_path}: {e}")
     
     def _parse_config(self, config_data: Dict[str, Any]) -> None:

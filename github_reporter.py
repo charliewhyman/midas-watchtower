@@ -25,9 +25,9 @@ class GitHubReporter:
             # Try to make it writable
             try:
                 self.reports_dir.chmod(0o777)
-            except:
-                pass  # Ignore permission errors on chmod
-        except Exception as e:
+            except PermissionError:
+                logger.debug("Insufficient permissions to chmod reports directory; continuing")
+        except (OSError, PermissionError) as e:
             logger.warning(f"Could not create reports directory {self.reports_dir}: {e}")
             # Fallback to current directory
             self.reports_dir = Path(".")
@@ -77,7 +77,7 @@ class GitHubReporter:
             
             return report_path
             
-        except Exception as e:
+        except (OSError, json.JSONDecodeError) as e:
             logger.error(f"Error generating JSON report: {e}")
             # Don't raise, just log and continue
             return Path("report_failed.json")

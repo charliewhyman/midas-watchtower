@@ -12,7 +12,7 @@ def setup_logging():
     # Try to create the log directory; if this fails we'll fall back to console logging.
     try:
         log_dir.mkdir(parents=True, exist_ok=True)
-    except Exception as e:
+    except (OSError, PermissionError) as e:
         # Can't create the directory — report to stderr and continue with console logging only.
         print(f"Warning: could not create log directory '{log_dir}': {e}", file=sys.stderr)
 
@@ -24,7 +24,7 @@ def setup_logging():
     except PermissionError as e:
         # Permission denied writing to the mounted logs directory — fall back to console.
         print(f"Warning: cannot write log file '{logfile_path}': {e}. Falling back to stdout/stderr.", file=sys.stderr)
-    except Exception as e:
+    except (OSError, IOError) as e:
         # Some other IO error; still fall back to console but show the problem.
         print(f"Warning: could not open log file '{logfile_path}': {e}. Falling back to stdout/stderr.", file=sys.stderr)
 
@@ -73,7 +73,7 @@ def detect_first_run():
                             watch_count = len(data['watches'])
                             logger.info(f"Datastore contains {watch_count} watches - continuing from previous run")
                             return False
-                except (json.JSONDecodeError, KeyError, Exception) as e:
+                except (json.JSONDecodeError, KeyError, ValueError, TypeError, OSError) as e:
                     logger.debug(f"Could not parse {datastore_file}: {e}")
                     continue
     
@@ -95,7 +95,7 @@ def detect_first_run():
                 if data and (data.get('metadata_history') or data.get('history')):
                     logger.info("Found existing change history file - continuing from previous run")
                     return False
-        except Exception as e:
+        except (json.JSONDecodeError, ValueError, TypeError, OSError) as e:
             logger.debug(f"Could not parse history file {history_file}: {e}")
     
     # No existing data found
@@ -119,7 +119,7 @@ def ensure_data_directories():
             test_file = path / ".write_test"
             test_file.touch()
             test_file.unlink()
-        except Exception as e:
+        except (OSError, PermissionError) as e:
             # Logging may not be available at this point; print to stderr so the caller sees the problem.
             print(f"Warning: Directory {dir_path} may not be writable: {e}", file=sys.stderr)
 
@@ -171,7 +171,7 @@ def main():
         
         return 0
         
-    except Exception as e:
+    except (RuntimeError, OSError) as e:
         logger.error(f"❌ Monitoring cycle failed: {e}")
         logger.exception("Full traceback:")
         print(f"Error: {e}")

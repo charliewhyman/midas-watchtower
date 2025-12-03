@@ -45,7 +45,7 @@ class UrlScheduler:
                     priority=priority,
                     next_check=datetime.now()  # All URLs start as due for immediate check
                 )
-            except Exception as e:
+            except (AttributeError, ValueError, TypeError) as e:
                 logger.exception(f"Failed to initialize schedule for entry {url_config}: {e}")
     
     def get_due_urls(self) -> List[Dict[str, Any]]:
@@ -169,7 +169,7 @@ class MonitoringScheduler:
                 time.sleep(1)
         except KeyboardInterrupt:
             logger.info("Monitoring scheduler stopped by user")
-        except Exception as e:
+        except (RuntimeError, OSError) as e:
             logger.error(f"Monitoring scheduler failed: {e}")
         finally:
             self.running = False
@@ -199,7 +199,7 @@ class MonitoringScheduler:
                        f"{stats.errors} errors, "
                        f"duration: {stats.duration_seconds:.1f}s")
             
-        except Exception as e:
+        except (RuntimeError, OSError) as e:
             logger.error(f"❌ Monitoring cycle failed: {e}")
     
     def get_status(self) -> Dict[str, Any]:

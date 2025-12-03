@@ -139,7 +139,7 @@ class ChangeDetector:
                     return entry
                 if canonical and (canonical == url or self._normalize_url(canonical) == norm_url):
                     return entry
-            except Exception as e:
+            except (ValueError, AttributeError, TypeError) as e:
                 logger.debug(f"Error matching historical entry for {url}: {e}")
                 continue
 
@@ -193,7 +193,7 @@ class ChangeDetector:
                     serializable_meta['html_metadata']['structured_data_canonical'] = canonical
                     serializable_meta['html_metadata']['structured_data_hash'] = self._json_hash(canonical)
                     
-            except Exception as e:
+            except (json.JSONDecodeError, TypeError, ValueError) as e:
                 # If anything fails, keep original structured_data and leave canonical fields None
                 logger.debug(f"Failed to canonicalize structured data for {url}: {e}")
             
@@ -204,11 +204,11 @@ class ChangeDetector:
                     for link in (metadata.html_metadata.important_links or []):
                         try:
                             linked_docs[link] = self._hash_remote_resource(link)
-                        except Exception as e:
+                        except (requests.RequestException, OSError, ValueError, TypeError) as e:
                             linked_docs[link] = {'error': str(e)}
 
                     serializable_meta['html_metadata']['linked_documents'] = linked_docs
-                except Exception as e:
+                except (requests.RequestException, OSError) as e:
                     # Non-fatal: don't break saving metadata if link fetching fails
                     logger.exception(f'Failed to fetch linked documents: {e}')
             else:
@@ -220,7 +220,7 @@ class ChangeDetector:
         key_source = metadata.final_url or metadata.url
         try:
             key = self._normalize_url(key_source)
-        except Exception as e:
+        except (ValueError, TypeError) as e:
             logger.debug(f"Failed to normalize key source '{key_source}', falling back to raw url: {e}")
             key = url
 
@@ -281,7 +281,7 @@ class ChangeDetector:
             else:
                 variants.add(self._normalize_url(urlunparse((scheme or 'http', f'www.{netloc}', path, '', '', ''))))
 
-        except Exception as e:
+        except (ValueError, AttributeError, TypeError) as e:
             logger.debug(f"Failed to generate URL variants for {url}: {e}")
 
         return list(variants)
@@ -442,7 +442,7 @@ class ChangeDetector:
                 normalized_links, previous.get('html_metadata', {})
             )
             changes.extend(linked_doc_changes)
-        except Exception as e:
+        except (ValueError, TypeError, AttributeError) as e:
             logger.exception(f'Failed to detect linked document changes: {e}')
         
         # Content analysis changes
@@ -477,7 +477,7 @@ class ChangeDetector:
                     headers = {k.lower(): v for k, v in head.headers.items()}
                     content_type = headers.get('content-type')
                     head_info = head
-                except Exception as e:
+                except requests.RequestException as e:
                     logger.debug(f"HEAD request failed for linked doc {url}: {e}")
                     head_info = None
 
@@ -533,7 +533,7 @@ class ChangeDetector:
             }
             self._link_fetch_cache[url] = result
             return result
-        except Exception as e:
+        except (requests.RequestException, OSError) as e:
             logger.warning(f'Failed to fetch remote resource {url}: {e}')
             result = {'error': str(e)}
             self._link_fetch_cache[url] = result
@@ -555,7 +555,7 @@ class ChangeDetector:
         for link in current_links:
             try:
                 current_docs[link] = self._hash_remote_resource(link, timeout=self.linked_doc_timeout)
-            except Exception as e:
+            except (requests.RequestException, OSError, ValueError, TypeError) as e:
                 current_docs[link] = {'error': str(e)}
 
         previous_docs = previous_html_meta.get('linked_documents', {}) if previous_html_meta else {}
@@ -627,7 +627,7 @@ class ChangeDetector:
                 obj = json.loads(data)
             else:
                 obj = data
-        except Exception as e:
+        except (json.JSONDecodeError, TypeError, ValueError) as e:
             # Fallback: return stringified value and log debug info
             logger.debug(f"Failed to parse data for canonicalization: {e}")
             return json.dumps(str(data), ensure_ascii=False)
@@ -710,7 +710,7 @@ class ChangeDetector:
                 # Extract model-card info and diff field-level changes
                 try:
                     cur_info = self._extract_model_card_info(json.loads(current_canonical))
-                except Exception as e:
+                except (json.JSONDecodeError, TypeError, ValueError) as e:
                     logger.debug(f"Failed to parse current canonical structured data JSON: {e}")
                     cur_info = self._extract_model_card_info(current_sd)
 
@@ -720,7 +720,7 @@ class ChangeDetector:
                         prev_info = self._extract_model_card_info(json.loads(previous_canonical))
                     else:
                         prev_info = self._extract_model_card_info(previous_sd)
-                except Exception as e:
+                except (json.JSONDecodeError, TypeError, ValueError) as e:
                     logger.debug(f"Failed to parse previous structured data JSON: {e}")
                     prev_info = {}
 
@@ -735,7 +735,7 @@ class ChangeDetector:
                             policy_alert=True
                         ))
 
-        except Exception as e:
+        except (json.JSONDecodeError, TypeError, ValueError, OSError) as e:
             # If anything goes wrong during structured-data diffing, don't crash detection
             logger.exception(f'Failed to compare structured data: {e}')
 
@@ -939,7 +939,7 @@ class ChangeDetector:
             with open(self.history_file, 'r', encoding='utf-8') as f:
                 content = f.read().strip()
                 return (not content or content in ('{}', 'null', '{"metadata_history": {}}'))
-        except Exception as e:
+        except (OSError, IOError) as e:
             logger.exception(f"Error checking history file for first-run: {e}")
             return True
     

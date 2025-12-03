@@ -39,7 +39,7 @@ class GoogleSheetsReporter:
             cred_source = None
             try:
                 cred_source = getattr(self.config.settings, 'get_google_sheets_credential_source', lambda: None)()
-            except Exception:
+            except (AttributeError, TypeError):
                 cred_source = None
 
             creds = None
@@ -51,14 +51,14 @@ class GoogleSheetsReporter:
                 # Try environment/config-provided credentials (private key in settings)
                 try:
                     creds = self._get_credentials_from_env()
-                except Exception:
+                except (AttributeError, ValueError, KeyError):
                     creds = None
 
             if creds is None:
                 # Fallback to service account file if provided
                 try:
                     creds = self._get_credentials_from_file()
-                except Exception:
+                except (OSError, FileNotFoundError, ValueError):
                     creds = None
             
             if creds:
@@ -69,7 +69,7 @@ class GoogleSheetsReporter:
                 logger.error("Failed to create Google Sheets credentials")
                 self.client = None
                 
-        except Exception as e:
+        except (OSError, ValueError) as e:
             logger.error(f"Unexpected error setting up Google Sheets: {e}")
             self.client = None
     
@@ -133,7 +133,7 @@ class GoogleSheetsReporter:
             logger.info("Successfully created credentials from GitHub Actions secrets")
             return creds
             
-        except Exception as e:
+        except (ValueError, KeyError) as e:
             logger.error(f"Error creating credentials from GitHub Actions: {e}")
             return None
     
@@ -178,7 +178,7 @@ class GoogleSheetsReporter:
             
             return Credentials.from_service_account_info(service_account_info, scopes=scopes)
             
-        except Exception as e:
+        except (AttributeError, ValueError, KeyError) as e:
             logger.error(f"Error creating credentials from environment: {e}")
             return None
     
@@ -197,7 +197,7 @@ class GoogleSheetsReporter:
             
             return Credentials.from_service_account_file(credentials_file, scopes=scopes)
             
-        except Exception as e:
+        except (OSError, FileNotFoundError, ValueError) as e:
             logger.error(f"Error creating credentials from file: {e}")
             return None
     
@@ -210,7 +210,7 @@ class GoogleSheetsReporter:
             spreadsheets = self.client.list_spreadsheet_files()
             logger.info(f"Google Sheets connection test successful. Found {len(spreadsheets)} spreadsheets.")
             return True
-        except Exception as e:
+        except (gspread.exceptions.APIError, OSError) as e:
             logger.error(f"Google Sheets connection test failed: {e}")
             self.client = None
             return False
@@ -231,10 +231,10 @@ class GoogleSheetsReporter:
                 spreadsheet = self.client.create(spreadsheet_name)
                 logger.info(f"Created new spreadsheet: {spreadsheet_name}")
                 return spreadsheet
-            except Exception as e:
+            except (gspread.exceptions.APIError, OSError) as e:
                 logger.error(f"Failed to create spreadsheet: {e}")
                 return None
-        except Exception as e:
+        except (gspread.exceptions.APIError, OSError) as e:
             logger.error(f"Error accessing spreadsheet: {e}")
             return None
     
@@ -284,7 +284,7 @@ class GoogleSheetsReporter:
             logger.info(f"Successfully logged change: {change.url}")
             return True
             
-        except Exception as e:
+        except (gspread.exceptions.APIError, OSError, ValueError) as e:
             logger.error(f"Failed to log change to Google Sheets: {e}")
             return False
 
@@ -298,7 +298,7 @@ class GoogleSheetsReporter:
         while attempt < max_retries:
             try:
                 return func(*args, **kwargs)
-            except Exception as e:
+            except (gspread.exceptions.APIError, OSError) as e:
                 msg = str(e)
                 # Consider 429 or rate limit text as retryable
                 if '429' in msg or 'RATE_LIMIT' in msg or 'quota' in msg.lower() or 'RESOURCE_EXHAUSTED' in msg:
@@ -311,7 +311,7 @@ class GoogleSheetsReporter:
                 # Non-rate-limit errors should bubble up
                 raise
         # If we exit loop, raise last error
-        raise Exception(f"Max retries exceeded for API call: {func.__name__}")
+        raise RuntimeError(f"Max retries exceeded for API call: {func.__name__}")
 
     def log_changes(self, changes: List[DetectedChange], batch_size: int = 50) -> Tuple[int, int]:
         """Log multiple changes in batches to reduce Sheets API requests.
@@ -355,13 +355,13 @@ class GoogleSheetsReporter:
                     self._retry_api_call(worksheet.append_rows, batch_rows, value_input_option='USER_ENTERED')
                     successful += len(batch_rows)
                     logger.info(f"Appended batch {i+1}/{num_batches} with {len(batch_rows)} rows to Sheets")
-                except Exception as e:
+                except (gspread.exceptions.APIError, OSError) as e:
                     logger.error(f"Failed to append batch {i+1}/{num_batches} to Sheets: {e}")
                     failed += len(batch_rows)
 
             return successful, failed
 
-        except Exception as e:
+        except (gspread.exceptions.APIError, OSError) as e:
             logger.error(f"Failed to log changes to Google Sheets: {e}")
             return 0, len(changes)
     
@@ -407,6 +407,6 @@ class GoogleSheetsReporter:
                 ''        # Notes
             ]
         
-        except Exception as e:
+        except (AttributeError, ValueError, TypeError) as e:
             logger.error(f"Error preparing change row: {e}")
             return ['ERROR'] * 11

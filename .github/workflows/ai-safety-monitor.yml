@@ -86,7 +86,7 @@ jobs:
           echo "DOCKER_COMPOSE_CMD=$DOCKER_COMPOSE_CMD" >> $GITHUB_ENV
 
           log_info "Building metadata-monitor image with cache..."
-          $DOCKER_COMPOSE_CMD build --progress=plain --build-arg BUILDKIT_INLINE_CACHE=1 metadata-monitor
+          $DOCKER_COMPOSE_CMD --progress=plain build --build-arg BUILDKIT_INLINE_CACHE=1 metadata-monitor
 
           log_info "Starting metadata-monitor service..."
           $DOCKER_COMPOSE_CMD -p $DOCKER_COMPOSE_PROJECT up -d metadata-monitor
@@ -106,7 +106,7 @@ jobs:
           fi
 
           # Ensure service is running
-          $DOCKER_COMPOSE_CMD -p "$DOCKER_COMPOSE_PROJECT" build --parallel metadata-monitor
+          $DOCKER_COMPOSE_CMD --progress=plain -p "$DOCKER_COMPOSE_PROJECT" build --parallel metadata-monitor
           $DOCKER_COMPOSE_CMD -p "$DOCKER_COMPOSE_PROJECT" up -d metadata-monitor
 
           CONTAINER_ID=$($DOCKER_COMPOSE_CMD -p "$DOCKER_COMPOSE_PROJECT" ps -q metadata-monitor || true)

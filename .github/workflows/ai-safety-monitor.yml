@@ -235,14 +235,3 @@ jobs:
           else
             echo "**History File Status:** ✗ Missing" >> $GITHUB_STEP_SUMMARY
           fi
-          
-          if [ -f data/reports/cycle_*.json ]; then
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "**Latest Report:**" >> $GITHUB_STEP_SUMMARY
-            LATEST_REPORT=$(ls -t data/reports/cycle_*.json 2>/dev/null | head -1)
-            if [ -n "$LATEST_REPORT" ]; then
-              echo '```json' >> $GITHUB_STEP_SUMMARY
-              cat "$LATEST_REPORT" >> $GITHUB_STEP_SUMMARY
-              echo '```' >> $GITHUB_STEP_SUMMARY
-            fi
-          fi

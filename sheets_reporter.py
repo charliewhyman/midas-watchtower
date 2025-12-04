@@ -266,28 +266,36 @@ class GoogleSheetsReporter:
             return worksheet
     
     def log_change(self, change: DetectedChange) -> bool:
-        """Log a change to Google Sheets, ensuring headers exist first"""
+        """Log a change to Google Sheets, ensuring headers exist first
+
+        If the change contains no actionable differences, skip logging.
+        """
         if not self.client:
             logger.error("Google Sheets client not available")
             return False
-        
+
         try:
             spreadsheet = self.ensure_spreadsheet_exists()
             if not spreadsheet:
                 logger.error("Failed to get or create spreadsheet")
                 return False
-            
+
             worksheet = self.setup_sheets_structure(spreadsheet)
             if not worksheet:
                 logger.error("Failed to get or create worksheet")
                 return False
-            
+
             change_row = self._prepare_change_row(change)
+            # Skip logging when there are no actionable changes
+            if change_row is None:
+                logger.debug(f"Skipping Sheets log for {change.url}: no actionable changes")
+                return False
+
             worksheet.append_row(change_row)
-            
+
             logger.info(f"Successfully logged change: {change.url}")
             return True
-            
+
         except (gspread.exceptions.APIError, OSError, ValueError) as e:
             logger.error(f"Failed to log change to Google Sheets: {e}")
             return False
@@ -337,8 +345,10 @@ class GoogleSheetsReporter:
                 logger.error("Failed to get or create worksheet")
                 return 0, len(changes)
 
-            # Prepare all rows
-            rows = [self._prepare_change_row(c) for c in changes]
+            # Prepare all rows, skipping any changes with no actionable differences
+            prepared = [(c, self._prepare_change_row(c)) for c in changes]
+            rows = [row for (_c, row) in prepared if row is not None]
+            skipped = len(prepared) - len(rows)
 
             successful = 0
             failed = 0
@@ -346,7 +356,8 @@ class GoogleSheetsReporter:
             # Chunk into batches to avoid huge requests and to respect per-request limits
             total = len(rows)
             if total == 0:
-                return 0, 0
+                logger.debug(f"No actionable rows to append to Sheets (skipped {skipped} items)")
+                return 0, skipped
 
             num_batches = math.ceil(total / batch_size)
             for i in range(num_batches):
@@ -363,15 +374,23 @@ class GoogleSheetsReporter:
                     logger.error(f"Failed to append batch {i+1}/{num_batches} to Sheets: {e}")
                     failed += len(batch_rows)
 
-            return successful, failed
+            # Include skipped count in failed/returned info by returning successful and total skipped as failed
+            return successful, failed + skipped
 
         except (gspread.exceptions.APIError, OSError) as e:
             logger.error(f"Failed to log changes to Google Sheets: {e}")
             return 0, len(changes)
     
     def _prepare_change_row(self, change: DetectedChange) -> list:
-        """Prepare a row for the Changes_Log sheet"""
+        """Prepare a row for the Changes_Log sheet
+
+        Returns `None` when there are no actionable changes and nothing should be logged.
+        """
         try:
+            # If there are no change entries, skip logging
+            if not getattr(change, 'changes', None):
+                return None
+
             # Extract change types and details
             change_types = []
             change_details = []

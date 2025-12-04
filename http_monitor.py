@@ -217,7 +217,22 @@ class HttpMonitor:
     def _extract_canonical_url(self, soup: BeautifulSoup) -> Optional[str]:
         """Extract canonical URL"""
         canonical = soup.find('link', attrs={'rel': 'canonical'})
-        return canonical.get('href') if canonical else None
+        if not canonical:
+            return None
+
+        href = canonical.get('href')
+        if href is None:
+            return None
+
+        # Handle list-like attribute values returned by some parsers
+        if isinstance(href, (list, tuple)):
+            href = href[0] if href else None
+            if href is None:
+                return None
+
+        # Coerce to string and strip whitespace; return None for empty values
+        href_str = str(href).strip()
+        return href_str if href_str else None
     
     def _extract_opengraph_metadata(self, soup: BeautifulSoup) -> Dict[str, str]:
         """Extract OpenGraph metadata"""
@@ -225,8 +240,22 @@ class HttpMonitor:
         og_tags = soup.find_all('meta', attrs={'property': re.compile(r'^og:', re.I)})
         
         for tag in og_tags:
-            property_name = tag.get('property', '').lower()
-            content = tag.get('content', '')
+            prop = tag.get('property')
+            # Normalize property to a string if it's list-like or None
+            if isinstance(prop, (list, tuple)):
+                prop = prop[0] if prop else ''
+            if prop is None:
+                prop = ''
+            property_name = str(prop).lower() if prop != '' else ''
+            
+            content = tag.get('content')
+            # Normalize content to a string if it's list-like or None
+            if isinstance(content, (list, tuple)):
+                content = content[0] if content else ''
+            if content is None:
+                content = ''
+            content = str(content)
+            
             if property_name and content:
                 # Remove 'og:' prefix and use as key
                 key = property_name.replace('og:', '')
@@ -240,12 +269,27 @@ class HttpMonitor:
         twitter_tags = soup.find_all('meta', attrs={'name': re.compile(r'^twitter:', re.I)})
         
         for tag in twitter_tags:
-            name = tag.get('name', '').lower()
-            content = tag.get('content', '')
-            if name and content:
+            # Safely extract name attribute (bs4 may return AttributeValueList or None)
+            name_attr = tag.get('name')
+            if isinstance(name_attr, (list, tuple)):
+                name_val = name_attr[0] if name_attr else None
+            else:
+                name_val = name_attr
+            name = str(name_val).lower() if name_val is not None else ''
+            
+            # Safely extract content attribute
+            content_attr = tag.get('content')
+            if isinstance(content_attr, (list, tuple)):
+                content_val = content_attr[0] if content_attr else ''
+            elif content_attr is None:
+                content_val = ''
+            else:
+                content_val = str(content_attr)
+            
+            if name and content_val:
                 # Remove 'twitter:' prefix and use as key
                 key = name.replace('twitter:', '')
-                twitter_metadata[key] = content
+                twitter_metadata[key] = content_val
         
         return twitter_metadata
     
@@ -267,10 +311,27 @@ class HttpMonitor:
         # Also check for http-equiv meta tags
         http_equiv_tags = soup.find_all('meta', attrs={'http-equiv': True})
         for tag in http_equiv_tags:
-            equiv = tag.get('http-equiv', '').lower()
-            content = tag.get('content', '')
-            if equiv and content:
-                other_meta[f"http_equiv_{equiv}"] = content
+            # Safely extract http-equiv attribute which might be an AttributeValueList or None
+            equiv_attr = tag.get('http-equiv')
+            if isinstance(equiv_attr, (list, tuple)):
+                equiv_val = equiv_attr[0] if equiv_attr else ''
+            elif equiv_attr is None:
+                equiv_val = ''
+            else:
+                equiv_val = str(equiv_attr)
+            equiv = equiv_val.lower() if equiv_val else ''
+            
+            # Safely extract content attribute which might be an AttributeValueList or None
+            content_attr = tag.get('content')
+            if isinstance(content_attr, (list, tuple)):
+                content_val = content_attr[0] if content_attr else ''
+            elif content_attr is None:
+                content_val = ''
+            else:
+                content_val = str(content_attr)
+            
+            if equiv and content_val:
+                other_meta[f"http_equiv_{equiv}"] = content_val
         
         return other_meta
     
@@ -324,19 +385,33 @@ class HttpMonitor:
             href = link.get('href', '')
             text = link.get_text(strip=True)
             
-            if not href or href.startswith(('javascript:', 'mailto:', 'tel:')):
+            # Normalize href to a plain string to avoid AttributeValueList errors
+            if isinstance(href, (list, tuple)):
+                href = href[0] if href else ''
+            elif href is None:
+                href = ''
+            href = str(href).strip()
+            
+            if not href or href.lower().startswith(('javascript:', 'mailto:', 'tel:')):
                 continue
                 
+            # Safely extract title attribute; handle None or list-like values
+            title_attr = link.get('title')
+            if isinstance(title_attr, (list, tuple)):
+                title_val = title_attr[0] if title_attr else ''
+            else:
+                title_val = title_attr or ''
             link_info = {
                 'url': href,
                 'text': text[:100] if text else '',  # Limit text length
-                'title': link.get('title', '')[:100]
+                'title': str(title_val)[:100]
             }
             
-            # Categorize links
-            if href.startswith('/') or (base_domain and base_domain in href):
+            # Categorize links (use lowercased href for domain checks)
+            href_lc = href.lower()
+            if href_lc.startswith('/') or (base_domain and base_domain in href_lc):
                 links['internal'].append(link_info)
-            elif any(domain in href for domain in social_domains):
+            elif any(domain in href_lc for domain in social_domains):
                 links['social'].append(link_info)
             else:
                 links['external'].append(link_info)
@@ -445,20 +520,45 @@ class HttpMonitor:
     def _detect_language(self, soup: BeautifulSoup) -> Optional[str]:
         """Detect page language"""
         html_tag = soup.find('html')
-        return html_tag.get('lang') if html_tag and html_tag.get('lang') else None
+        if not html_tag:
+            return None
+
+        lang_attr = html_tag.get('lang')
+
+        # Handle BeautifulSoup AttributeValueList or other non-str types
+        if isinstance(lang_attr, (list, tuple)):
+            lang_val = lang_attr[0] if lang_attr else None
+        else:
+            lang_val = lang_attr
+
+        if lang_val is None:
+            return None
+
+        lang_str = str(lang_val).strip()
+        return lang_str if lang_str else None
     
     def _detect_charset(self, soup: BeautifulSoup, response: requests.Response) -> Optional[str]:
         """Detect character encoding"""
         # From meta tag
         meta_charset = soup.find('meta', attrs={'charset': True})
         if meta_charset:
-            return meta_charset.get('charset')
+            charset_attr = meta_charset.get('charset')
+            # Handle BeautifulSoup AttributeValueList or other non-str types
+            if isinstance(charset_attr, (list, tuple)):
+                charset_attr = charset_attr[0] if charset_attr else None
+            if charset_attr is None:
+                return None
+            # Ensure we return a plain stripped string or None
+            charset_str = str(charset_attr).strip()
+            return charset_str if charset_str else None
         
         # From content-type meta tag
         meta_content_type = soup.find('meta', attrs={'http-equiv': re.compile('content-type', re.I)})
         if meta_content_type and meta_content_type.get('content'):
             content_type = meta_content_type.get('content')
-            if 'charset=' in content_type.lower():
+            if isinstance(content_type, (list, tuple)):
+                content_type = content_type[0] if content_type else ''
+            if content_type and 'charset=' in content_type.lower():
                 return content_type.split('charset=')[1].split(';')[0].strip()
         
         # From response headers

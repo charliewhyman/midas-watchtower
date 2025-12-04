@@ -197,7 +197,22 @@ class HttpMonitor:
     def _extract_meta_description(self, soup: BeautifulSoup) -> Optional[str]:
         """Extract meta description"""
         meta_desc = soup.find('meta', attrs={'name': 'description'})
-        return meta_desc.get('content', '').strip() if meta_desc else None
+        if not meta_desc:
+            return None
+
+        # Safely get the content attribute and handle non-string values
+        content = meta_desc.get('content')
+        if content is None:
+            return None
+
+        # If content is a list-like (AttributeValueList) or tuple, take the first item
+        if isinstance(content, (list, tuple)):
+            content = content[0] if content else None
+            if content is None:
+                return None
+
+        # Coerce to string and strip whitespace
+        return str(content).strip()
     
     def _extract_canonical_url(self, soup: BeautifulSoup) -> Optional[str]:
         """Extract canonical URL"""

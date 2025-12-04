@@ -30,7 +30,7 @@ class HttpMonitor:
         # Configure retry strategy
         retry_strategy = Retry(
             total=self.config.settings.max_retries,
-            backoff_factor=0.5,
+            backoff_factor=1,
             status_forcelist=[429, 500, 502, 503, 504],
         )
         

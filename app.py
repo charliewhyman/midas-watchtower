@@ -10,7 +10,6 @@ import uvicorn
 from monitoring_service import MonitoringService
 from config import ConfigurationError
 import logging
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 

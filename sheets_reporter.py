@@ -381,7 +381,7 @@ class GoogleSheetsReporter:
             logger.error(f"Failed to log changes to Google Sheets: {e}")
             return 0, len(changes)
     
-    def _prepare_change_row(self, change: DetectedChange) -> list:
+    def _prepare_change_row(self, change: DetectedChange) -> Optional[list]:
         """Prepare a row for the Changes_Log sheet
 
         Returns `None` when there are no actionable changes and nothing should be logged.
